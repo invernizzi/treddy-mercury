@@ -2,11 +2,11 @@
 
 > "Don't stop me now, I'm having such a good time!" 🎶
 
-Reverse engineering the **Norditrack s20i** because staring at a wall while running is boring. This project helps add some distraction to your runs.
+Reverse engineering the **NordicTrack s20i** because I need a distraction while larping as a hamster on their wheel. 
 
 ## 🚀 Usage
 
-Just run:
+Just run, and run:
 
 ```bash
 ./run.sh
