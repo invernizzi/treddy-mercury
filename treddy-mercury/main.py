@@ -110,7 +110,7 @@ class TreadmillApp(App):
         self.parsed_events = collections.deque()
         self.ble_client = None
         self.stop_event = asyncio.Event()
-        self.user_weight_kg = 86.0 # Default, will fetch
+        self.user_weight_kg = 86.0  # Default, will fetch
         self.accumulated_calories = 0.0
         self.last_metric_update_time = time.time()
 
@@ -238,20 +238,22 @@ class TreadmillApp(App):
         now = time.time()
         dt = now - self.last_metric_update_time
         self.last_metric_update_time = now
-        
+
         if dt <= 0:
             return
 
         # Calculate rate (cal/hour)
-        cal_per_hour = calculate_calories(self.user_weight_kg, self.speed_kph, self.incline_deg, 3600)
+        cal_per_hour = calculate_calories(
+            self.user_weight_kg, self.speed_kph, self.incline_deg, 3600
+        )
         self.calories_per_hour = cal_per_hour
-        
+
         # Accumulate total roughly
         # Only accumulate if speed > 0
         if self.speed_kph > 0.1:
-             self.accumulated_calories += (cal_per_hour / 3600) * dt
-             self.calories_burned = self.accumulated_calories
-             self.seconds_total += dt
+            self.accumulated_calories += (cal_per_hour / 3600) * dt
+            self.calories_burned = self.accumulated_calories
+            self.seconds_total += dt
 
     async def save_loop(self):
         while True:
