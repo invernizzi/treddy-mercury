@@ -18,4 +18,6 @@ jobs:
           python-version: '3.12'
 
       - name: Run tests
-        run: uv run --with pyyaml,fitbit,python-dotenv,bleak,rich python treadfit/test_calories.py
+        run: |
+          export PYTHONPATH=.
+          uv run --with pyyaml,fitbit,python-dotenv,bleak,rich python treadfit/test_calories.py
