@@ -1,3 +1,3 @@
 #!/bin/bash
 
-uv run --with bleak,rich,fitbit,python-dotenv,pyyaml main.py
+uv run --with bleak,rich,fitbit,python-dotenv,pyyaml treddy-mercury/main.py
