@@ -100,7 +100,7 @@ class TreadmillApp(App):
     speed_kph = reactive(0.0)
     incline_deg = reactive(0.0)
     distance_km = reactive(0.0)
-    seconds_total = reactive(0)
+    seconds_total = reactive(0.0)
     calories_burned = reactive(0.0)
     calories_per_hour = reactive(0.0)
     connection_status = reactive("Disconnected")
@@ -110,9 +110,9 @@ class TreadmillApp(App):
         self.parsed_events = collections.deque()
         self.ble_client = None
         self.stop_event = asyncio.Event()
-        self.user_weight_kg = 86.0  # Default, will fetch
+        self.user_weight_kg = 86.0 # Default, will fetch
         self.accumulated_calories = 0.0
-        self.last_calorie_update_time = time.time()
+        self.last_metric_update_time = time.time()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -220,37 +220,38 @@ class TreadmillApp(App):
                 self.update_metrics_00(s, i, d)
 
             case 0x01:
-                # Notification message.
-                sec = struct.unpack_from("<H", data, 9)[0]
-                self.update_metrics_01(sec)
+                # Notification message - Time received from treadmill.
+                # often unreliable (counts down in programs), so we might ignore it or stick to local time tracking.
+                # For now, let's just log it but NOT update the main time counter to avoid "countdown" issues.
+                pass
 
     def update_metrics_00(self, s, i, d):
         self.speed_kph = s
         self.incline_deg = i
         self.distance_km = d
 
-    def update_metrics_01(self, sec):
-        self.seconds_total = sec
+    # def update_metrics_01(self, sec):
+    #    self.seconds_total = sec
 
     def calculate_realtime_metrics(self):
-        # Calculate instantaneous calories
+        # Calculate instantaneous calories and time
         now = time.time()
-        dt = now - self.last_calorie_update_time
+        dt = now - self.last_metric_update_time
+        self.last_metric_update_time = now
+        
         if dt <= 0:
             return
-        self.last_calorie_update_time = now
 
         # Calculate rate (cal/hour)
-        cal_per_hour = calculate_calories(
-            self.user_weight_kg, self.speed_kph, self.incline_deg, 3600
-        )
+        cal_per_hour = calculate_calories(self.user_weight_kg, self.speed_kph, self.incline_deg, 3600)
         self.calories_per_hour = cal_per_hour
-
+        
         # Accumulate total roughly
         # Only accumulate if speed > 0
         if self.speed_kph > 0.1:
-            self.accumulated_calories += (cal_per_hour / 3600) * dt
-            self.calories_burned = self.accumulated_calories
+             self.accumulated_calories += (cal_per_hour / 3600) * dt
+             self.calories_burned = self.accumulated_calories
+             self.seconds_total += dt
 
     async def save_loop(self):
         while True:
@@ -281,9 +282,9 @@ class TreadmillApp(App):
         self.query_one("#distance", Metric).update_value(f"{value:.3f}")
 
     def watch_seconds_total(self, value):
-        minutes = (value // 60) % 60
-        seconds = value % 60
-        hours = value // 3600
+        minutes = int((value // 60) % 60)
+        seconds = int(value % 60)
+        hours = int(value // 3600)
         if hours > 0:
             self.query_one("#time", Metric).update_value(
                 f"{hours}:{minutes:02d}:{seconds:02d}"
