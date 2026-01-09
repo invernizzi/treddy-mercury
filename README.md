@@ -6,12 +6,22 @@ Reverse engineering the **NordicTrack s20i** because I need a distraction while 
 
 ## 🚀 Usage
 
-Just run, and run:
+Dependencies are managed via `uv`, so just run:
 
 ```bash
 ./run.sh
 ```
 
-## 📸 Screenshot
+This will launch the TUI (Textual User Interface), connect to the treadmill via BLE, and start tracking your run.
+
+Runs are:
+1. Saved locally to `data/`.
+2. Automatically uploaded to Fitbit when the app starts.
+
+## 📸 Functionality
+
+- **Live Dashboard**: Shows speed, incline, distance, time, and calories.
+- **Calorie Tracking**: Uses ACSM metabolic equations and your Fitbit weight profile for accuracy.
+- **Auto-Sync**: Background uploads to Fitbit.
 
 ![Screenshot](screenshot.png)
