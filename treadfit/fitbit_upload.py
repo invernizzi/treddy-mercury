@@ -46,7 +46,8 @@ def calculate_calories(
     # Kcal/min = (VO2 * weight_kg) / 1000 * 5
     kcal_per_min = (vo2_ml_kg_min * weight_kg) / 1000.0 * 5.0
 
-    return kcal_per_min * (duration_seconds / 60.0)
+    # Reduce by 20% as manual correction
+    return kcal_per_min * (duration_seconds / 60.0) * 0.8
 
 
 def process_existing_runs():
@@ -290,6 +291,40 @@ def upload_to_fitbit(
 
     print(f"Successfully logged run: {response}")
     return response
+
+
+def get_fitbit_client():
+    client_id = os.getenv("FITBIT_CLIENT_ID")
+    client_secret = os.getenv("FITBIT_CLIENT_SECRET")
+    access_token = os.getenv("FITBIT_ACCESS_TOKEN")
+    refresh_token = os.getenv("FITBIT_REFRESH_TOKEN")
+
+    if not all([client_id, client_secret, access_token, refresh_token]):
+        return None
+
+    return Fitbit(
+        client_id,
+        client_secret,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        system="METRIC",
+    )
+
+
+def get_user_weight(client=None):
+    if not client:
+        client = get_fitbit_client()
+        if not client:
+            return 86.0
+
+    try:
+        profile = client.user_profile_get()
+        weight = profile.get("user", {}).get("weight")
+        if weight:
+            return float(weight)
+    except Exception:
+        pass
+    return 86.0
 
 
 if __name__ == "__main__":

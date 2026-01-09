@@ -30,7 +30,7 @@ class TestCalculateCalories(unittest.TestCase):
         )
 
         # approximate check
-        self.assertAlmostEqual(cals, 5.088, places=2)
+        self.assertAlmostEqual(cals, 4.07, places=2)
 
     def test_walking_incline(self):
         # 5 km/h, 5% incline (approx 2.86 degrees? tan(2.86)=0.05), ... wait
@@ -48,7 +48,7 @@ class TestCalculateCalories(unittest.TestCase):
         cals = calculate_calories(
             self.user_weight_kg, speed_kph, incline_deg, duration_sec
         )
-        self.assertAlmostEqual(cals, 10.73, places=1)
+        self.assertAlmostEqual(cals, 8.58, places=1)
 
     def test_running_flat(self):
         # 10 km/h, 0% incline, 60 seconds
@@ -66,7 +66,7 @@ class TestCalculateCalories(unittest.TestCase):
         cals = calculate_calories(
             self.user_weight_kg, speed_kph, incline_deg, duration_sec
         )
-        self.assertAlmostEqual(cals, 15.84, places=1)
+        self.assertAlmostEqual(cals, 12.67, places=1)
 
     def test_running_incline(self):
         # 10 km/h, 2 degrees incline
@@ -83,7 +83,7 @@ class TestCalculateCalories(unittest.TestCase):
         cals = calculate_calories(
             self.user_weight_kg, speed_kph, incline_deg, duration_sec
         )
-        self.assertAlmostEqual(cals, 18.09, places=1)
+        self.assertAlmostEqual(cals, 14.47, places=1)
 
 
 if __name__ == "__main__":
