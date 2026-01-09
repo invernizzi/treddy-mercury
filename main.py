@@ -11,6 +11,10 @@ from rich import print
 from rich.live import Live
 import collections
 from bleak import BleakScanner, BleakClient
+import yaml
+from dataclasses import dataclass
+import time
+from treadfit.fitbit_upload import process_existing_runs
 
 # Bluetooth Configuration.
 DEVICE_NAME = "I_TL"
@@ -45,33 +49,52 @@ parsed_events = collections.deque()
 stop_event = asyncio.Event()
 
 
-def print_status(speed_kph, incline_deg, distance_km, seconds_total):
-    minutes = (seconds_total // 60) % 60
-    seconds = seconds_total % 60
+@dataclass
+class TreadmillStatus:
+    speed_kph: float = 0.0
+    incline_deg: float = 0.0
+    distance_km: float = 0.0
+    seconds_total: int = 0
+
+
+def print_status(treatmill_status: TreadmillStatus):
+    minutes = (treatmill_status.seconds_total // 60) % 60
+    seconds = treatmill_status.seconds_total % 60
     status = (
-        f"Speed: {speed_kph:4.1f} KPH | "
-        f"Incline: {incline_deg:4.1f}% | "
-        f"Distance: {distance_km:.3f} KM | "
+        f"Speed: {treatmill_status.speed_kph:4.1f} KPH | "
+        f"Incline: {treatmill_status.incline_deg:4.1f}% | "
+        f"Distance: {treatmill_status.distance_km:.3f} KM | "
         f"Time: {minutes:d}:{seconds:02d}"
     )
     live.update(status, refresh=True)
 
 
-def print_last_status():
-    speed_kph, incline_deg, distance_km, seconds_total = None, None, None, None
+def get_current_status():
+    speed_kph, incline_deg, distance_km, seconds_total = 0, 0, 0, 0
     for event in reversed(parsed_events):
-        speed_kph = speed_kph or event.get("speed_kph")
-        incline_deg = incline_deg or event.get("incline_deg")
-        distance_km = distance_km or event.get("distance_km")
-        seconds_total = seconds_total or event.get("seconds_total")
+        speed_kph = speed_kph or event.get("speed_kph", 0)
+        incline_deg = incline_deg or event.get("incline_deg", 0)
+        distance_km = distance_km or event.get("distance_km", 0)
+        seconds_total = seconds_total or event.get("seconds_total", 0)
         if (
-            speed_kph is not None
-            and incline_deg is not None
-            and distance_km is not None
-            and seconds_total is not None
+            speed_kph >= 0
+            and incline_deg >= 0
+            and distance_km > 0
+            and seconds_total > 0
         ):
-            print_status(speed_kph, incline_deg, distance_km, seconds_total)
             break
+    # Computed derived values: calories
+
+    return TreadmillStatus(
+        speed_kph=speed_kph,
+        incline_deg=incline_deg,
+        distance_km=distance_km,
+        seconds_total=seconds_total,
+    )
+
+
+def print_last_status():
+    print_status(get_current_status())
 
 
 def parse_treadmill_data(_sender: int, data: bytearray):
@@ -124,6 +147,26 @@ async def polling_loop(client):
         print(f"\n[Polling Error] {e}")
 
 
+async def save_loop():
+    """
+    Every 30 seconds, save the current treadmill state to a YAML file.
+    """
+    while not stop_event.is_set():
+        await asyncio.sleep(30)
+        treadmill_status = get_current_status()
+        data = {
+            "timestamp": time.time(),
+            "speed_kph": treadmill_status.speed_kph,
+            "incline_deg": treadmill_status.incline_deg,
+            "distance_km": treadmill_status.distance_km,
+            "seconds_total": treadmill_status.seconds_total,
+        }
+        date_str = time.strftime("%Y-%m-%d", time.localtime(data["timestamp"]))
+        live.update(f"\n[Data Saved at {date_str}]", refresh=True)
+        with open(f"data/treadmill_data_{date_str}.yaml", "a") as f:
+            yaml.dump([data], f)
+
+
 async def main():
     with live:
         live.update(f"Scanning for '{DEVICE_NAME}'...")
@@ -152,11 +195,20 @@ async def main():
 
             # Start polling loop.
             poller = asyncio.create_task(polling_loop(client))
-            await poller
+            # Start save loop.
+            saver = asyncio.create_task(save_loop())
+            # Wait until interrupted.
+            try:
+                await poller
+            except asyncio.CancelledError:
+                pass
 
 
 if __name__ == "__main__":
+    # Upload existing runs first
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+    process_existing_runs()
