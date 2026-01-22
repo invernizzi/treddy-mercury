@@ -24,13 +24,11 @@ jobs:
         run: npm ci
         working-directory: ./pwa  
 
-      - name: Build
-        run: npm run build
+      - run: pnpm build:cloudflare
         working-directory: ./pwa
-
-      - name: Deploy to Cloudflare Pages
+      
+      - name: Build & Deploy Worker
         uses: cloudflare/wrangler-action@v3
+
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy pwa/.output/public --project-name=treddy-mercury --branch=master
