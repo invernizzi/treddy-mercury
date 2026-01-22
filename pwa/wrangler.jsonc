@@ -9,7 +9,7 @@
 	//"pages_build_output_dir": "./dist",
 	"observability": {
 		"enabled": true
-	}
+	},
 
 	/**
 	 * Environment Variables
@@ -25,7 +25,8 @@
 	 * Static Assets
 	 * https://developers.cloudflare.com/workers/static-assets/binding/
 	 */
-	// "assets": { "directory": "./public/", "binding": "ASSETS" },
+	"main": ".output/server/index.mjs",
+	"assets": { "directory": ".output/public", "binding": "ASSETS" },
 
 	/**
 	 * Service Bindings (communicate between multiple Workers)
