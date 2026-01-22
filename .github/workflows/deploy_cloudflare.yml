@@ -33,5 +33,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .output/public --project-name=treddy-mercury --branch=master
-        working-directory: ./pwa
+          command: pages deploy pwa/.output/public --project-name=treddy-mercury --branch=master
