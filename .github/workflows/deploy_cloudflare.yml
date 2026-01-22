@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - master
+      - main
 
 jobs:
   build_and_deploy:
@@ -24,7 +24,7 @@ jobs:
         run: npm ci
         working-directory: ./pwa  
 
-      - run: pnpm build:cloudflare
+      - run: npm run build:cloudflare
         working-directory: ./pwa
       
       - name: Build & Deploy Worker
