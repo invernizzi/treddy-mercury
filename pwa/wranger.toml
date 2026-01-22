@@ -1,0 +1,4 @@
+name = "treadmill"
+compatibility_date = "2025-04-24"
+main = "./.output/server/index.mjs"
+assets = { directory = "./.output/public/", binding = "ASSETS" }
