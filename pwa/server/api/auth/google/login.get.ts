@@ -13,12 +13,11 @@ export default defineEventHandler((event) => {
 
   const scopes = [
     'openid',
-    'email',
-    'profile',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/fitness.activity.write',
     'https://www.googleapis.com/auth/fitness.location.write',
     'https://www.googleapis.com/auth/fitness.body.write',
-    'https://www.googleapis.com/auth/health.workout',
   ]
 
   const params = new URLSearchParams()
