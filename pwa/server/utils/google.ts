@@ -13,7 +13,10 @@ export function getGoogleConfig(event: H3Event) {
   const clientSecret = config.googleClientSecret || process.env.GOOGLE_CLIENT_SECRET
   
   const reqUrl = getRequestURL(event)
-  const redirectUri = `${reqUrl.protocol}//${reqUrl.host}/api/auth/google/callback`
+  const proto = reqUrl.host.includes('localhost') || reqUrl.host.includes('127.0.0.1')
+    ? reqUrl.protocol
+    : 'https:'
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${proto}//${reqUrl.host}/api/auth/google/callback`
 
   return { clientId, clientSecret, redirectUri }
 }
