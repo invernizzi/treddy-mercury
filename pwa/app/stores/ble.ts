@@ -41,6 +41,8 @@ interface BleState {
   timeStr: string
   
   // Internal tracking
+  workoutSeconds: number
+  hasSyncedInitialState: boolean
   accumulatedCalories: number
   startTime: number
   lastMetricUpdateTime: number
@@ -60,8 +62,10 @@ export const useBleStore = defineStore('ble', {
     inclineDeg: 0.0,
     distanceKm: 0.0,
     calories: 0,
-    timeStr: '00:00',
+    timeStr: '0:00',
     
+    workoutSeconds: 0,
+    hasSyncedInitialState: false,
     accumulatedCalories: 0.0,
     startTime: 0,
     lastMetricUpdateTime: 0,
@@ -70,12 +74,51 @@ export const useBleStore = defineStore('ble', {
   }),
 
   actions: {
+    formatTime(totalSeconds: number): string {
+      const total = Math.floor(Math.max(0, totalSeconds))
+      const m = Math.floor(total / 60)
+      const s = total % 60
+      const h = Math.floor(m / 60)
+      
+      if (h > 0) {
+        return `${h}:${(m % 60).toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+      } else {
+        return `${m}:${s.toString().padStart(2, '0')}`
+      }
+    },
+
+    updateTimeStr(totalSeconds: number) {
+      this.timeStr = this.formatTime(totalSeconds)
+    },
+
+    syncInitialWorkoutState(distanceKm: number, speedKph: number, inclineDeg: number) {
+      const userWeight = 86.0
+      let initialSeconds = this.workoutSeconds
+      if (initialSeconds <= 0 && speedKph > 0) {
+        initialSeconds = (distanceKm / speedKph) * 3600
+      }
+      if (initialSeconds > 0) {
+        const initialCalories = calculateCalories(userWeight, speedKph, inclineDeg, initialSeconds)
+        this.accumulatedCalories = initialCalories
+        this.calories = Math.floor(this.accumulatedCalories)
+        if (this.workoutSeconds <= 0) {
+          this.workoutSeconds = Math.floor(initialSeconds)
+          this.updateTimeStr(this.workoutSeconds)
+        }
+      }
+    },
+
     startDemo() {
         if (this.connected) return
         this.connected = true
         this.status = 'Demo Mode'
         this.startTime = Date.now()
         this.lastMetricUpdateTime = Date.now()
+        this.workoutSeconds = 0
+        this.hasSyncedInitialState = true
+        this.accumulatedCalories = 0.0
+        this.calories = 0
+        this.updateTimeStr(0)
         
         let demoSpeed = 5.0
         let demoIncline = 0.0
@@ -138,6 +181,7 @@ export const useBleStore = defineStore('ble', {
 
         this.connected = true
         this.status = 'Initializing...'
+        this.hasSyncedInitialState = false
         
         for (const hex of INITIALIZATION_SEQUENCE) {
           await writeChar.writeValue(hexStringToBytes(hex))
@@ -184,18 +228,39 @@ export const useBleStore = defineStore('ble', {
     },
 
     handleNotification(data: DataView) {
-      if (data.byteLength < 12) return
+      if (data.byteLength < 10) return
 
       const firstByte = data.getUint8(0)
       
-      if (firstByte === 0x00) {
+      if (firstByte === 0x00 && data.byteLength >= 18) {
         const speed = data.getUint16(10, true) / 100.0
         const incline = data.getUint16(12, true) / 100.0
         const distance = data.getUint16(16, true) / 1000.0
         
+        if (!this.hasSyncedInitialState && distance > 0) {
+          this.syncInitialWorkoutState(distance, speed, incline)
+          this.hasSyncedInitialState = true
+        }
+
         this.speedKph = speed
         this.inclineDeg = incline
         this.distanceKm = distance
+      } else if (firstByte === 0x01 && data.byteLength >= 11) {
+        const treadmillSeconds = data.getUint16(9, true)
+        if (treadmillSeconds > 0) {
+          if (!this.hasSyncedInitialState && this.distanceKm > 0 && this.accumulatedCalories === 0) {
+            const avgSpeed = this.speedKph > 0 ? this.speedKph : (this.distanceKm / treadmillSeconds) * 3600
+            const userWeight = 86.0
+            this.accumulatedCalories = calculateCalories(userWeight, avgSpeed, this.inclineDeg, treadmillSeconds)
+            this.calories = Math.floor(this.accumulatedCalories)
+            this.workoutSeconds = treadmillSeconds
+            this.updateTimeStr(this.workoutSeconds)
+            this.hasSyncedInitialState = true
+          } else if (this.workoutSeconds === 0) {
+            this.workoutSeconds = treadmillSeconds
+            this.updateTimeStr(this.workoutSeconds)
+          }
+        }
       }
     },
 
@@ -212,17 +277,8 @@ export const useBleStore = defineStore('ble', {
             const cal = calculateCalories(userWeight, this.speedKph, this.inclineDeg, dt)
             this.accumulatedCalories += cal
             this.calories = Math.floor(this.accumulatedCalories)
-        }
-        
-        const totalHelpers = Math.floor((now - this.startTime) / 1000)
-        const m = Math.floor(totalHelpers / 60)
-        const s = totalHelpers % 60
-        const h = Math.floor(m / 60)
-        
-        if (h > 0) {
-            this.timeStr = `${h}:${(m%60).toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-        } else {
-            this.timeStr = `${m}:${s.toString().padStart(2, '0')}`
+            this.workoutSeconds += dt
+            this.updateTimeStr(Math.floor(this.workoutSeconds))
         }
     }
   }
