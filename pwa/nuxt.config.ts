@@ -8,9 +8,11 @@ export default defineNuxtConfig({
     // Keys within public are also exposed to the client-side
     public: {
       fitbitClientId: '', // Overwrite with Env if needed
+      googleClientId: '',
     },
     // The private keys which are only available server-side
     fitbitClientSecret: '', 
+    googleClientSecret: '',
   },
 
   nitro: {
