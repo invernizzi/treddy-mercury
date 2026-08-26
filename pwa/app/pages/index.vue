@@ -23,7 +23,25 @@
         </button>
       </div>
 
-      <!-- Sync feedback toast/banner -->
+      <!-- Prominent "Workout Synced!" Success Card -->
+      <transition name="fade">
+        <div v-if="syncedWorkout" class="sync-success-card">
+          <div class="sync-success-header">
+            <span class="check-circle">✓</span>
+            <div class="sync-title-group">
+              <div class="sync-main-title">Workout Synced to Google Health!</div>
+              <div class="sync-sub-details">
+                <strong>{{ syncedWorkout.distanceKm.toFixed(2) }} km</strong> &middot;
+                <strong>{{ syncedWorkout.calories }} kcal</strong> &middot;
+                <span>{{ syncedWorkout.timeStr }}</span>
+              </div>
+            </div>
+            <button @click="syncedWorkout = null" class="close-card-btn" title="Dismiss">&times;</button>
+          </div>
+        </div>
+      </transition>
+
+      <!-- Transient Error / Info Banner -->
       <div v-if="syncMessage" class="sync-banner" :class="{ error: syncError }">
         {{ syncMessage }}
       </div>
@@ -98,11 +116,18 @@
 import { ref, onMounted } from 'vue'
 import { useBleStore } from '~/stores/ble'
 
+interface SyncedSummary {
+  distanceKm: number
+  calories: number
+  timeStr: string
+}
+
 const bleStore = useBleStore()
 const googleConnected = ref(false)
 const isSyncing = ref(false)
 const syncMessage = ref('')
 const syncError = ref(false)
+const syncedWorkout = ref<SyncedSummary | null>(null)
 
 onMounted(async () => {
   // Check URL query parameters for OAuth callbacks
@@ -139,6 +164,7 @@ async function logoutGoogle() {
     googleConnected.value = false
     syncMessage.value = 'Disconnected from Google Health'
     syncError.value = false
+    syncedWorkout.value = null
   } catch (e) {
     console.error('Logout error', e)
   }
@@ -159,6 +185,7 @@ async function syncWorkout() {
     const durationMillis = Math.max(1000, bleStore.workoutSeconds * 1000)
     const endTimeMillis = Date.now()
     const startTimeMillis = endTimeMillis - durationMillis
+    const currentTimeStr = bleStore.timeStr
 
     const res = await $fetch<{ success: boolean; distanceKm: number; calories: number }>(
       '/api/google-health',
@@ -174,7 +201,14 @@ async function syncWorkout() {
       }
     )
 
-    syncMessage.value = `✓ Synced ${res.distanceKm.toFixed(2)} km (${res.calories} kcal) to Google Health!`
+    // Set prominent synced workout card
+    syncedWorkout.value = {
+      distanceKm: res.distanceKm,
+      calories: res.calories,
+      timeStr: currentTimeStr || `${Math.floor(bleStore.workoutSeconds / 60)}m ${Math.floor(bleStore.workoutSeconds % 60)}s`
+    }
+
+    syncMessage.value = ''
     syncError.value = false
   } catch (err: any) {
     syncError.value = true
@@ -260,6 +294,67 @@ header {
 
 .google-btn:hover {
   background: #f8f9fa;
+}
+
+/* Prominent "Workout Synced!" Card */
+.sync-success-card {
+  margin-top: 1rem;
+  background: linear-gradient(135deg, rgba(52, 168, 83, 0.2), rgba(66, 133, 244, 0.15));
+  border: 2px solid #34A853;
+  border-radius: 10px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 12px rgba(52, 168, 83, 0.2);
+}
+
+.sync-success-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.check-circle {
+  background: #34A853;
+  color: #ffffff;
+  font-size: 1.2rem;
+  font-weight: bold;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sync-title-group {
+  flex: 1;
+}
+
+.sync-main-title {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.sync-sub-details {
+  font-size: 0.9rem;
+  color: #c8e6c9;
+  margin-top: 2px;
+}
+
+.close-card-btn {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}
+
+.close-card-btn:hover {
+  color: #fff;
 }
 
 .sync-banner {
@@ -354,5 +449,16 @@ button.danger {
 button.danger:hover {
   background: #ff4444;
   color: white;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 </style>
