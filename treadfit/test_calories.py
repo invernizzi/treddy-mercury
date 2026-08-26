@@ -85,6 +85,19 @@ class TestCalculateCalories(unittest.TestCase):
         )
         self.assertAlmostEqual(cals, 14.47, places=1)
 
+    def test_session_backfill_calculation(self):
+        # Scenario from user screenshot: 4.3 km/h, 0% incline, 1.558 km
+        speed_kph = 4.3
+        incline_deg = 0.0
+        distance_km = 1.558
+        estimated_duration = (distance_km / speed_kph) * 3600  # ~1304.37 sec (21:44)
+
+        cals = calculate_calories(
+            self.user_weight_kg, speed_kph, incline_deg, estimated_duration
+        )
+        self.assertAlmostEqual(estimated_duration, 1304.37, places=1)
+        self.assertAlmostEqual(cals, 79.77, places=1)
+
 
 if __name__ == "__main__":
     unittest.main()

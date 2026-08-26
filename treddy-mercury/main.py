@@ -112,6 +112,7 @@ class TreadmillApp(App):
         self.stop_event = asyncio.Event()
         self.user_weight_kg = 86.0  # Default, will fetch
         self.accumulated_calories = 0.0
+        self.has_synced_initial_state = False
         self.last_metric_update_time = time.time()
 
     def compose(self) -> ComposeResult:
@@ -203,12 +204,27 @@ class TreadmillApp(App):
     def update_status(self, status):
         self.query_one("#status-bar", Label).update(f"Status: {status}")
 
+    def sync_initial_workout_state(self, distance_km, speed_kph, incline_deg):
+        initial_secs = self.seconds_total
+        if initial_secs <= 0 and speed_kph > 0:
+            initial_secs = (distance_km / speed_kph) * 3600
+        if initial_secs > 0:
+            initial_cals = calculate_calories(
+                self.user_weight_kg, speed_kph, incline_deg, initial_secs
+            )
+            self.accumulated_calories = initial_cals
+            self.calories_burned = self.accumulated_calories
+            if self.seconds_total <= 0:
+                self.seconds_total = initial_secs
+
     def parse_treadmill_data(self, _sender: int, data: bytearray):
-        if len(data) < 12:
+        if len(data) < 10:
             return
 
         match data[0]:
             case 0x00:
+                if len(data) < 18:
+                    return
                 # Notification message.
                 s = struct.unpack_from("<H", data, 10)[0] / 100.0
                 i = struct.unpack_from("<H", data, 12)[0] / 100.0
@@ -216,14 +232,39 @@ class TreadmillApp(App):
                     struct.unpack_from("<H", data, 16)[0] / 1000.0
                 )  # BLE returns meters? Original code divided by 1000.
 
+                if not self.has_synced_initial_state and d > 0:
+                    self.sync_initial_workout_state(d, s, i)
+                    self.has_synced_initial_state = True
+
                 # Update reactive variables
                 self.update_metrics_00(s, i, d)
 
             case 0x01:
                 # Notification message - Time received from treadmill.
-                # often unreliable (counts down in programs), so we might ignore it or stick to local time tracking.
-                # For now, let's just log it but NOT update the main time counter to avoid "countdown" issues.
-                pass
+                if len(data) >= 11:
+                    treadmill_secs = struct.unpack_from("<H", data, 9)[0]
+                    if treadmill_secs > 0:
+                        if (
+                            not self.has_synced_initial_state
+                            and self.distance_km > 0
+                            and self.accumulated_calories == 0
+                        ):
+                            avg_speed = (
+                                self.speed_kph
+                                if self.speed_kph > 0
+                                else (self.distance_km / treadmill_secs) * 3600
+                            )
+                            self.accumulated_calories = calculate_calories(
+                                self.user_weight_kg,
+                                avg_speed,
+                                self.incline_deg,
+                                treadmill_secs,
+                            )
+                            self.calories_burned = self.accumulated_calories
+                            self.seconds_total = treadmill_secs
+                            self.has_synced_initial_state = True
+                        elif self.seconds_total <= 0:
+                            self.seconds_total = treadmill_secs
 
     def update_metrics_00(self, s, i, d):
         self.speed_kph = s
