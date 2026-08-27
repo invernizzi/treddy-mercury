@@ -1,7 +1,8 @@
 import { defineEventHandler, readBody, createError } from 'h3'
 import {
   getSessionCookie,
-  getValidAccessToken
+  getValidAccessToken,
+  writeActiveEnergyBurned
 } from '../utils/google'
 
 export default defineEventHandler(async (event) => {
@@ -65,6 +66,14 @@ export default defineEventHandler(async (event) => {
       statusCode: 500,
       statusMessage: `Failed to write workout to Google Health: ${errText}`
     })
+  }
+
+  if (calories > 0) {
+    try {
+      await writeActiveEnergyBurned(token, startTimeMillis, endTimeMillis, calories)
+    } catch (err) {
+      console.warn('Could not write active-energy-burned data point:', err)
+    }
   }
 
   return {

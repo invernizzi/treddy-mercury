@@ -98,3 +98,41 @@ export async function getValidAccessToken(event: H3Event, session: GoogleSession
   setSessionCookie(event, session)
   return session.access_token
 }
+
+// Writes a granular active-energy-burned data point so calories also feed the daily
+// aggregates/charts, in addition to the exercise summary. Best-effort: failures are non-fatal.
+export async function writeActiveEnergyBurned(
+  token: string,
+  startTimeMillis: number,
+  endTimeMillis: number,
+  kcal: number
+): Promise<void> {
+  const payload = {
+    dataSource: {
+      recordingMethod: 'ACTIVELY_MEASURED'
+    },
+    activeEnergyBurned: {
+      interval: {
+        startTime: new Date(startTimeMillis).toISOString(),
+        startUtcOffset: '0s',
+        endTime: new Date(endTimeMillis).toISOString(),
+        endUtcOffset: '0s'
+      },
+      kcal
+    }
+  }
+
+  const res = await fetch('https://health.googleapis.com/v4/users/me/dataTypes/active-energy-burned/dataPoints', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify(payload)
+  })
+
+  if (!res.ok) {
+    console.warn('Could not write active-energy-burned data point:', await res.text())
+  }
+}
