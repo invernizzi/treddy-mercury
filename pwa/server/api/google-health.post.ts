@@ -1,8 +1,7 @@
 import { defineEventHandler, readBody, createError } from 'h3'
 import {
   getSessionCookie,
-  getValidAccessToken,
-  getOrCreateDataSource
+  getValidAccessToken
 } from '../utils/google'
 
 export default defineEventHandler(async (event) => {
@@ -22,129 +21,54 @@ export default defineEventHandler(async (event) => {
   const endTimeMillis = Number(body.endTimeMillis) || (startTimeMillis + (Number(body.durationMillis) || 0))
   const distanceMeters = Math.max(0, (Number(body.distanceKm) || 0) * 1000)
   const calories = Math.max(0, Number(body.calories) || 0)
+  const activeDurationSeconds = Math.max(1, Math.round((endTimeMillis - startTimeMillis) / 1000))
 
-  const startTimeNanos = BigInt(startTimeMillis) * BigInt(1000000)
-  const endTimeNanos = BigInt(endTimeMillis) * BigInt(1000000)
-  const sessionId = `treddy_${startTimeMillis}`
-
-  // 1. Create or Update Google Fitness Session (Activity Type 58 = Running treadmill)
-  const sessionPayload = {
-    id: sessionId,
-    name: 'Treadmill Run',
-    description: 'Tracked with Treddy Mercury',
-    startTimeMillis: startTimeMillis.toString(),
-    endTimeMillis: endTimeMillis.toString(),
-    activityType: 57, // 57 = Running (treadmill)
-    application: {
-      name: 'Treddy Mercury',
-      version: '1.0'
+  const payload = {
+    dataSource: {
+      recordingMethod: 'ACTIVELY_MEASURED'
+    },
+    exercise: {
+      interval: {
+        startTime: new Date(startTimeMillis).toISOString(),
+        startUtcOffset: '0s',
+        endTime: new Date(endTimeMillis).toISOString(),
+        endUtcOffset: '0s'
+      },
+      exerciseType: 'TREADMILL',
+      displayName: 'Treadmill Run',
+      activeDuration: `${activeDurationSeconds}s`,
+      exerciseMetadata: {
+        hasGps: false
+      },
+      metricsSummary: {
+        caloriesKcal: calories,
+        distanceMillimeters: distanceMeters * 1000,
+        averageSpeedMillimetersPerSecond: (distanceMeters * 1000) / activeDurationSeconds
+      }
     }
   }
 
-  const sessionRes = await fetch(
-    `https://www.googleapis.com/fitness/v1/users/me/sessions/${encodeURIComponent(sessionId)}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(sessionPayload)
-    }
-  )
+  const res = await fetch('https://health.googleapis.com/v4/users/me/dataTypes/exercise/dataPoints', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify(payload)
+  })
 
-  if (!sessionRes.ok) {
-    const errText = await sessionRes.text()
-    console.error('Session create failed:', errText)
+  if (!res.ok) {
+    const errText = await res.text()
+    console.error('Google Health exercise write failed:', errText)
     throw createError({
       statusCode: 500,
-      statusMessage: `Failed to create workout session: ${errText}`
+      statusMessage: `Failed to write workout to Google Health: ${errText}`
     })
-  }
-
-  // 2. Write Distance dataset
-  if (distanceMeters > 0) {
-    try {
-      const distanceStreamId = await getOrCreateDataSource(
-        token,
-        'com.google.distance.delta',
-        'treadmill_distance'
-      )
-
-      const distanceDataset = {
-        dataSourceId: distanceStreamId,
-        minStartTimeNs: startTimeNanos.toString(),
-        maxEndTimeNs: endTimeNanos.toString(),
-        point: [
-          {
-            dataTypeName: 'com.google.distance.delta',
-            startTimeNanos: startTimeNanos.toString(),
-            endTimeNanos: endTimeNanos.toString(),
-            value: [{ fpVal: distanceMeters }]
-          }
-        ]
-      }
-
-      const patchUrl = `https://www.googleapis.com/fitness/v1/users/me/dataSources/${encodeURIComponent(
-        distanceStreamId
-      )}/datasets/${startTimeNanos}-${endTimeNanos}`
-
-      await fetch(patchUrl, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(distanceDataset)
-      })
-    } catch (err) {
-      console.warn('Could not insert distance dataset:', err)
-    }
-  }
-
-  // 3. Write Calories dataset
-  if (calories > 0) {
-    try {
-      const caloriesStreamId = await getOrCreateDataSource(
-        token,
-        'com.google.calories.expended',
-        'treadmill_calories'
-      )
-
-      const caloriesDataset = {
-        dataSourceId: caloriesStreamId,
-        minStartTimeNs: startTimeNanos.toString(),
-        maxEndTimeNs: endTimeNanos.toString(),
-        point: [
-          {
-            dataTypeName: 'com.google.calories.expended',
-            startTimeNanos: startTimeNanos.toString(),
-            endTimeNanos: endTimeNanos.toString(),
-            value: [{ fpVal: calories }]
-          }
-        ]
-      }
-
-      const patchUrl = `https://www.googleapis.com/fitness/v1/users/me/dataSources/${encodeURIComponent(
-        caloriesStreamId
-      )}/datasets/${startTimeNanos}-${endTimeNanos}`
-
-      await fetch(patchUrl, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(caloriesDataset)
-      })
-    } catch (err) {
-      console.warn('Could not insert calories dataset:', err)
-    }
   }
 
   return {
     success: true,
-    sessionId,
     startTimeMillis,
     endTimeMillis,
     distanceKm: distanceMeters / 1000,

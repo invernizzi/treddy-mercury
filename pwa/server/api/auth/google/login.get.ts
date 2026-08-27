@@ -15,9 +15,7 @@ export default defineEventHandler((event) => {
     'openid',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',
-    'https://www.googleapis.com/auth/fitness.activity.write',
-    'https://www.googleapis.com/auth/fitness.location.write',
-    'https://www.googleapis.com/auth/fitness.body.write',
+    'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.writeonly',
   ]
 
   const params = new URLSearchParams()
