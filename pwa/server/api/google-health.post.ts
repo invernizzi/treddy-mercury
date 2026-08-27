@@ -2,7 +2,9 @@ import { defineEventHandler, readBody, createError } from 'h3'
 import {
   getSessionCookie,
   getValidAccessToken,
-  writeActiveEnergyBurned
+  writeActiveEnergyBurned,
+  clearSessionCookie,
+  GOOGLE_HEALTH_SCOPE
 } from '../utils/google'
 
 export default defineEventHandler(async (event) => {
@@ -13,6 +15,16 @@ export default defineEventHandler(async (event) => {
     throw createError({
       statusCode: 401,
       statusMessage: 'Not authenticated with Google. Please connect your Google account.'
+    })
+  }
+
+  // Sessions granted before the switch to the Google Health API lack this scope and will
+  // always be rejected with DISALLOWED_OAUTH_SCOPES - force a fresh consent instead.
+  if (!session.scope?.includes(GOOGLE_HEALTH_SCOPE)) {
+    clearSessionCookie(event)
+    throw createError({
+      statusCode: 401,
+      statusMessage: 'Google session is missing the required Health scope. Please reconnect your Google account.'
     })
   }
 

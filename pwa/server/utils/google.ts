@@ -7,6 +7,8 @@ export interface GoogleSession {
   scope?: string
 }
 
+export const GOOGLE_HEALTH_SCOPE = 'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.writeonly'
+
 export function getGoogleConfig(event: H3Event) {
   const config = useRuntimeConfig(event)
   const clientId = config.public.googleClientId || process.env.GOOGLE_CLIENT_ID

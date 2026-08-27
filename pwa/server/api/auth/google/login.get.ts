@@ -1,5 +1,5 @@
 import { defineEventHandler, sendRedirect, createError } from 'h3'
-import { getGoogleConfig } from '../../../utils/google'
+import { getGoogleConfig, GOOGLE_HEALTH_SCOPE } from '../../../utils/google'
 
 export default defineEventHandler((event) => {
   const { clientId, redirectUri } = getGoogleConfig(event)
@@ -15,7 +15,7 @@ export default defineEventHandler((event) => {
     'openid',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',
-    'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.writeonly',
+    GOOGLE_HEALTH_SCOPE,
   ]
 
   const params = new URLSearchParams()
