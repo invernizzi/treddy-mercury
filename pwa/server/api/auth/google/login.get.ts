@@ -25,7 +25,9 @@ export default defineEventHandler((event) => {
   params.append('scope', scopes.join(' '))
   params.append('access_type', 'offline')
   params.append('prompt', 'consent')
-  params.append('include_granted_scopes', 'true')
+  // Avoid merging previously-granted legacy Fit scopes into the new token - Google Health
+  // rejects tokens that mix its scope with the old fitness.* scopes (DISALLOWED_OAUTH_SCOPES).
+  params.append('include_granted_scopes', 'false')
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
   return sendRedirect(event, authUrl, 302)
