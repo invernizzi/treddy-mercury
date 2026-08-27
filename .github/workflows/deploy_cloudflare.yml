@@ -24,8 +24,6 @@ jobs:
         run: npm ci --registry=https://registry.npmjs.org/
         working-directory: ./pwa
         env:
-          HTTP_PROXY: ""
-          HTTPS_PROXY: ""
           http_proxy: ""
           https_proxy: ""
           npm_config_proxy: ""
