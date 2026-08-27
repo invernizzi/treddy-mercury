@@ -141,8 +141,11 @@ export async function getOrCreateDataSource(
   })
 
   if (!postRes.ok) {
-    // If creation failed or already existed, return the constructed ID
-    console.warn('Could not create data source explicitly, using default stream ID', await postRes.text())
+    const errText = await postRes.text()
+    // 409/alreadyExists just means a previous run already created it - the constructed ID is still valid, no need to warn
+    if (postRes.status !== 409 && !errText.includes('alreadyExists')) {
+      console.warn('Could not create data source explicitly, using default stream ID', errText)
+    }
   }
 
   return dataSourceId

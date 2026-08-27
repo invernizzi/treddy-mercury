@@ -26,6 +26,8 @@ function hexStringToBytes(hex: string): Uint8Array {
   return bytes
 }
 
+const LAST_DEVICE_ID_KEY = 'treddy_last_device_id'
+
 interface BleState {
   device: any | null
   server: any | null
@@ -155,61 +157,93 @@ export const useBleStore = defineStore('ble', {
           ]
         })
 
-        this.device = device
-        this.status = 'Connecting to Server...'
-        
-        device.addEventListener('gattserverdisconnected', this.onDisconnected)
-        
-        const server = await device.gatt?.connect()
-        if (!server) throw new Error('Could not connect to GATT Server')
-        this.server = server
-
-        this.status = 'Getting Service...'
-        const service = await server.getPrimaryService("00001533-1412-efde-1523-785feabcd123")
-        
-        this.status = 'Getting Characteristics...'
-        const writeChar = await service.getCharacteristic(WRITE_UUID)
-        const notifyChar = await service.getCharacteristic(NOTIFY_UUID)
-
-        this.writeChar = writeChar
-        
-        await notifyChar.startNotifications()
-        notifyChar.addEventListener('characteristicvaluechanged', (event: any) => {
-          const value = event.target.value
-          if (value) this.handleNotification(value)
-        })
-
-        this.connected = true
-        this.status = 'Initializing...'
-        this.hasSyncedInitialState = false
-        
-        for (const hex of INITIALIZATION_SEQUENCE) {
-          await writeChar.writeValue(hexStringToBytes(hex))
-          await new Promise(r => setTimeout(r, 100))
-        }
-
-        this.status = 'Running'
-        this.startTime = Date.now()
-        this.lastMetricUpdateTime = Date.now()
-
-        this.pollInterval = setInterval(async () => {
-           if (!this.connected || !this.writeChar) return
-           try {
-             for (const hex of POLL_SEQUENCE) {
-               await this.writeChar.writeValue(hexStringToBytes(hex))
-             }
-             this.updateRealtimeMetrics()
-           } catch (e) {
-             console.error("Poll error", e)
-           }
-        }, 1000)
-
+        await this.setupDevice(device)
       } catch (e) {
         console.error(e)
         this.status = `Error: ${e}`
         this.connected = false
       }
     },
+
+    // Attempts to reconnect to the last used treadmill without prompting the device chooser.
+    // Requires the experimental navigator.bluetooth.getDevices() API and a live user gesture
+    // for the actual GATT connection in most browsers, so this may silently fail.
+    async autoReconnect() {
+      if (!import.meta.client || this.connected) return
+
+      // @ts-ignore
+      if (!navigator.bluetooth?.getDevices) return
+
+      const lastDeviceId = localStorage.getItem(LAST_DEVICE_ID_KEY)
+      if (!lastDeviceId) return
+
+      try {
+        // @ts-ignore
+        const devices = await navigator.bluetooth.getDevices()
+        const device = devices.find((d: any) => d.id === lastDeviceId)
+        if (!device) return
+
+        this.status = 'Reconnecting to Treadmill...'
+        await this.setupDevice(device)
+      } catch (e) {
+        console.warn('Auto-reconnect failed, manual connect required', e)
+        this.status = 'Disconnected'
+      }
+    },
+
+    async setupDevice(device: any) {
+      this.device = device
+      this.status = 'Connecting to Server...'
+
+      device.addEventListener('gattserverdisconnected', this.onDisconnected)
+
+      const server = await device.gatt?.connect()
+      if (!server) throw new Error('Could not connect to GATT Server')
+      this.server = server
+
+      this.status = 'Getting Service...'
+      const service = await server.getPrimaryService("00001533-1412-efde-1523-785feabcd123")
+
+      this.status = 'Getting Characteristics...'
+      const writeChar = await service.getCharacteristic(WRITE_UUID)
+      const notifyChar = await service.getCharacteristic(NOTIFY_UUID)
+
+      this.writeChar = writeChar
+
+      await notifyChar.startNotifications()
+      notifyChar.addEventListener('characteristicvaluechanged', (event: any) => {
+        const value = event.target.value
+        if (value) this.handleNotification(value)
+      })
+
+      this.connected = true
+      this.status = 'Initializing...'
+      this.hasSyncedInitialState = false
+
+      localStorage.setItem(LAST_DEVICE_ID_KEY, device.id)
+
+      for (const hex of INITIALIZATION_SEQUENCE) {
+        await writeChar.writeValue(hexStringToBytes(hex))
+        await new Promise(r => setTimeout(r, 100))
+      }
+
+      this.status = 'Running'
+      this.startTime = Date.now()
+      this.lastMetricUpdateTime = Date.now()
+
+      this.pollInterval = setInterval(async () => {
+         if (!this.connected || !this.writeChar) return
+         try {
+           for (const hex of POLL_SEQUENCE) {
+             await this.writeChar.writeValue(hexStringToBytes(hex))
+           }
+           this.updateRealtimeMetrics()
+         } catch (e) {
+           console.error("Poll error", e)
+         }
+      }, 1000)
+    },
+
 
     disconnect() {
       if (this.device && this.device.gatt?.connected) {

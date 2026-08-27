@@ -143,6 +143,7 @@ onMounted(async () => {
   }
 
   await checkGoogleStatus()
+  await bleStore.autoReconnect()
 })
 
 async function checkGoogleStatus() {

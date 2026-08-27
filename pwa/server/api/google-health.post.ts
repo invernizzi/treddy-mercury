@@ -34,7 +34,7 @@ export default defineEventHandler(async (event) => {
     description: 'Tracked with Treddy Mercury',
     startTimeMillis: startTimeMillis.toString(),
     endTimeMillis: endTimeMillis.toString(),
-    activityType: 58, // 58 = Running (treadmill)
+    activityType: 57, // 57 = Running (treadmill)
     application: {
       name: 'Treddy Mercury',
       version: '1.0'
