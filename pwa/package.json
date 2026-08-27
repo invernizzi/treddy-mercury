@@ -8,7 +8,7 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "build:cloudflare": "nuxt build --ssr true --preset=cloudflare",
+    "build:cloudflare": "nuxt build --ssr=true --preset=cloudflare",
     "deploy:cloudflare": "npm run build:cloudflare && npx wrangler deploy"
   },
   "dependencies": {
