@@ -50,6 +50,9 @@ interface BleState {
   lastMetricUpdateTime: number
   pollInterval: any
   demoInterval: any
+
+  // History of speed/incline/distance samples over the workout, used to plot the chart
+  history: { t: number; speed: number; incline: number; distance: number }[]
 }
 
 export const useBleStore = defineStore('ble', {
@@ -72,7 +75,9 @@ export const useBleStore = defineStore('ble', {
     startTime: 0,
     lastMetricUpdateTime: 0,
     pollInterval: null,
-    demoInterval: null
+    demoInterval: null,
+
+    history: []
   }),
 
   actions: {
@@ -107,6 +112,28 @@ export const useBleStore = defineStore('ble', {
           this.workoutSeconds = Math.floor(initialSeconds)
           this.updateTimeStr(this.workoutSeconds)
         }
+        // We joined mid-workout: backfill the chart assuming flat 0 incline and
+        // the average speed (distance/time) for the untracked period, then let
+        // it pick up with the real reading from now on.
+        const avgSpeed = distanceKm > 0 ? (distanceKm / initialSeconds) * 3600 : speedKph
+        this.history = [
+          { t: 0, speed: avgSpeed, incline: 0, distance: 0 },
+          { t: Math.floor(initialSeconds), speed: speedKph, incline: inclineDeg, distance: distanceKm }
+        ]
+      }
+    },
+
+    addHistoryPoint() {
+      this.history.push({
+        t: Math.round(this.workoutSeconds),
+        speed: this.speedKph,
+        incline: this.inclineDeg,
+        distance: this.distanceKm
+      })
+      // Keep the stored history bounded by periodically discarding every other
+      // sample once it grows very large; the chart still spans the full duration.
+      if (this.history.length > 3600) {
+        this.history = this.history.filter((_, i) => i % 2 === 0)
       }
     },
 
@@ -121,6 +148,7 @@ export const useBleStore = defineStore('ble', {
         this.accumulatedCalories = 0.0
         this.calories = 0
         this.updateTimeStr(0)
+        this.history = []
         
         let demoSpeed = 5.0
         let demoIncline = 0.0
@@ -140,6 +168,7 @@ export const useBleStore = defineStore('ble', {
             this.distanceKm = demoDistance
             
             this.updateRealtimeMetrics()
+            this.addHistoryPoint()
         }, 1000)
     },
 
@@ -219,6 +248,7 @@ export const useBleStore = defineStore('ble', {
       this.connected = true
       this.status = 'Initializing...'
       this.hasSyncedInitialState = false
+      this.history = []
 
       localStorage.setItem(LAST_DEVICE_ID_KEY, device.id)
 
@@ -238,6 +268,7 @@ export const useBleStore = defineStore('ble', {
              await this.writeChar.writeValue(hexStringToBytes(hex))
            }
            this.updateRealtimeMetrics()
+           this.addHistoryPoint()
          } catch (e) {
            console.error("Poll error", e)
          }
@@ -290,6 +321,10 @@ export const useBleStore = defineStore('ble', {
             this.workoutSeconds = treadmillSeconds
             this.updateTimeStr(this.workoutSeconds)
             this.hasSyncedInitialState = true
+            this.history = [
+              { t: 0, speed: avgSpeed, incline: 0, distance: 0 },
+              { t: treadmillSeconds, speed: this.speedKph, incline: this.inclineDeg, distance: this.distanceKm }
+            ]
           } else if (this.workoutSeconds === 0) {
             this.workoutSeconds = treadmillSeconds
             this.updateTimeStr(this.workoutSeconds)

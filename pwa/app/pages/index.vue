@@ -109,6 +109,8 @@
         </button>
       </template>
     </div>
+
+    <WorkoutChart v-if="bleStore.history.length > 0" :history="bleStore.history" />
   </div>
 </template>
 
@@ -282,19 +284,21 @@ header {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #ffffff;
-  color: #3c4043;
-  border: 1px solid #dadce0;
-  padding: 6px 14px;
+  background: transparent;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  padding: 8px 16px;
   font-size: 0.85rem;
-  border-radius: 4px;
-  font-weight: 500;
+  font-family: inherit;
+  text-transform: uppercase;
+  border-radius: 0;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
 }
 
 .google-btn:hover {
-  background: #f8f9fa;
+  background: var(--color-primary);
+  color: var(--color-bg);
 }
 
 /* Prominent "Workout Synced!" Card */
