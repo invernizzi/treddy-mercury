@@ -21,8 +21,8 @@ export default defineNuxtConfig({
 
   pwa: {
     manifest: {
-      name: 'Treddy Mercury',
-      short_name: 'Treddy',
+      name: 'Dino Run',
+      short_name: 'Dino Run',
       theme_color: '#000000',
       description: 'NordicTrack s20i Dashboard & Sync',
       icons: [

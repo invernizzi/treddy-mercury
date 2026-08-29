@@ -3,7 +3,6 @@
     <div class="chart-header">
       <span class="legend"><i class="swatch flat"></i> Flat</span>
       <span class="legend"><i class="swatch steep"></i> Incline</span>
-      <span class="lap-info">Lap {{ lapNumber }} &middot; {{ distanceKm.toFixed(2) }} km</span>
     </div>
     <div class="chart-wrapper" ref="wrapperEl">
       <canvas ref="canvasEl"></canvas>
@@ -44,6 +43,21 @@ const HALF_WIDTH_WORLD = 9
 const MAX_INCLINE_FOR_SCALE = 20 // % incline that maxes out the reserved vertical space
 const MAX_HEIGHT_WORLD = 22
 
+// Static decorative props scattered across the infield, given fixed world positions
+// so they stay put lap after lap instead of jittering every frame.
+const FIELD_DECORATIONS: { x: number; z: number; type: 'palm' | 'rock'; s: number }[] = [
+  { x: 45, z: 20, type: 'palm', s: 1.1 },
+  { x: 60, z: 45, type: 'rock', s: 0.9 },
+  { x: 75, z: 15, type: 'palm', s: 0.9 },
+  { x: 50, z: 40, type: 'rock', s: 1.2 },
+  { x: 85, z: 42, type: 'palm', s: 1.0 },
+  { x: 40, z: 46, type: 'rock', s: 0.7 },
+  { x: 65, z: 25, type: 'palm', s: 1.3 },
+  { x: 95, z: 30, type: 'rock', s: 1.0 },
+  { x: 18, z: 30, type: 'rock', s: 0.8 },
+  { x: 112, z: 30, type: 'palm', s: 1.1 }
+]
+
 const COS30 = Math.cos(Math.PI / 6)
 const SIN30 = Math.sin(Math.PI / 6)
 
@@ -52,8 +66,38 @@ function iso(wx: number, wz: number, wy: number) {
   return { x: (wx - wz) * COS30, y: (wx + wz) * SIN30 - wy }
 }
 
+// Speed thresholds (km/h) that unlock each dino accessory / track detail tier.
+const DINO_HAT_SPEED = 5
+const DINO_SPIKES_SPEED = 6
+const DINO_JETPACK_SPEED = 8
+
+const TRACK_ROCKS_SPEED = 4
+const TRACK_TRAIL_SPEED = 6
+const TRACK_CACTUS_SPEED = 8
+
+// Tiers are cumulative: each stage keeps the previous stage's accessories/detail and adds more.
+function dinoTier(speed: number): number {
+  if (speed >= DINO_JETPACK_SPEED) return 3
+  if (speed >= DINO_SPIKES_SPEED) return 2
+  if (speed >= DINO_HAT_SPEED) return 1
+  return 0
+}
+
+function trackTier(speed: number): number {
+  if (speed >= TRACK_CACTUS_SPEED) return 3
+  if (speed >= TRACK_TRAIL_SPEED) return 2
+  if (speed >= TRACK_ROCKS_SPEED) return 1
+  return 0
+}
+
+// Deterministic pseudo-random in [0, 1), seeded by an integer so the same bucket always
+// picks the same decoration variant instead of reshuffling every animation frame.
+function hashSeed(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453
+  return x - Math.floor(x)
+}
+
 const distanceKm = computed(() => props.history.length ? props.history[props.history.length - 1]!.distance : 0)
-const lapNumber = computed(() => Math.floor(distanceKm.value / LAP_KM) + 1)
 
 // Returns the ground-plane point, outward normal and tangent direction for a fraction (0..1) around the stadium track.
 function trackPoint(fraction: number) {
@@ -98,14 +142,25 @@ function trackPoint(fraction: number) {
   }
 }
 
-// A small T-Rex runner silhouette (chrome-dino inspired), drawn facing +x with alternating legs.
-function drawDino(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, scale: number, runFrame: number) {
+// A small T-Rex runner silhouette (chrome-dino inspired). Drawn upright like a billboarded
+// isometric sprite (never rotated flat with the ground), mirrored by travel direction.
+// Accessories stack up with speed: tier 1 adds a hat, tier 2 adds back spikes, tier 3 adds a jetpack.
+function drawDino(ctx: CanvasRenderingContext2D, x: number, y: number, facingRight: boolean, scale: number, runFrame: number, tier: number) {
   ctx.save()
-  ctx.translate(x, y)
-  ctx.rotate(angle)
-  ctx.scale(scale, scale)
 
-  ctx.fillStyle = '#6b6b6b'
+  // Soft contact shadow sits right at the anchor (ground contact) point.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 0.5 * scale, 7.5 * scale, 2.3 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.translate(x, y)
+  ctx.scale(scale * (facingRight ? 1 : -1), scale)
+  // Shift the whole sprite up so its feet (drawn around local y=9) rest on the anchor,
+  // instead of the body sinking below the track surface.
+  ctx.translate(0, -9)
+
+  ctx.fillStyle = '#2f8f46'
   // Tail
   ctx.beginPath()
   ctx.moveTo(-11, 3)
@@ -129,8 +184,33 @@ function drawDino(ctx: CanvasRenderingContext2D, x: number, y: number, angle: nu
   ctx.closePath()
   ctx.fill()
 
+  // Lighter belly patch for a bit of shading.
+  ctx.fillStyle = '#8fd39a'
+  ctx.beginPath()
+  ctx.moveTo(-6, 2)
+  ctx.quadraticCurveTo(-6, -2, -3, -3)
+  ctx.quadraticCurveTo(0, -2, 1, 2)
+  ctx.lineTo(-2, 3)
+  ctx.lineTo(-6, 2)
+  ctx.closePath()
+  ctx.fill()
+
+  // Back spikes (tier 2+)
+  if (tier >= 2) {
+    ctx.fillStyle = '#1f5c2c'
+    const spikes: [number, number][] = [[-6, -6], [-4, -7], [-2, -8], [0, -8.5], [2, -9]]
+    for (const [sx, sy] of spikes) {
+      ctx.beginPath()
+      ctx.moveTo(sx - 1, sy + 1)
+      ctx.lineTo(sx, sy - 2.5)
+      ctx.lineTo(sx + 1, sy + 1)
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
+
   // Small arm
-  ctx.fillStyle = '#5a5a5a'
+  ctx.fillStyle = '#256b37'
   ctx.fillRect(3, -4, 3, 1.6)
 
   // Eye
@@ -139,8 +219,39 @@ function drawDino(ctx: CanvasRenderingContext2D, x: number, y: number, angle: nu
   ctx.arc(7.5, -10, 0.9, 0, Math.PI * 2)
   ctx.fill()
 
+  // Fun hat (tier 1+)
+  if (tier >= 1) {
+    ctx.fillStyle = '#ff5252'
+    ctx.beginPath()
+    ctx.moveTo(6.5, -12)
+    ctx.lineTo(9.5, -12)
+    ctx.lineTo(8, -18)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = '#ffd54f'
+    ctx.beginPath()
+    ctx.arc(8, -18, 1, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // Jetpack with a flickering flame (tier 3)
+  if (tier >= 3) {
+    ctx.fillStyle = '#555'
+    ctx.fillRect(-9, -9, 4, 7)
+    ctx.fillStyle = '#777'
+    ctx.fillRect(-9, -9, 4, 1.5)
+    ctx.fillStyle = '#ff9800'
+    const flicker = Math.sin(Date.now() / 80) * 0.8
+    ctx.beginPath()
+    ctx.moveTo(-8, -2)
+    ctx.lineTo(-6, -2)
+    ctx.lineTo(-7, 2.5 + flicker)
+    ctx.closePath()
+    ctx.fill()
+  }
+
   // Legs (alternate stride)
-  ctx.fillStyle = '#6b6b6b'
+  ctx.fillStyle = '#256b37'
   if (runFrame === 0) {
     ctx.fillRect(2, 3, 2.4, 6)
     ctx.fillRect(-3, 3, 2.4, 4)
@@ -149,6 +260,144 @@ function drawDino(ctx: CanvasRenderingContext2D, x: number, y: number, angle: nu
     ctx.fillRect(-4, 3, 2.4, 6)
   }
 
+  ctx.restore()
+}
+
+// A simple isometric palm tree: trunk + a fan of fronds, billboarded like the dino.
+function drawPalm(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 1 * scale, 6 * scale, 2 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.translate(x, y)
+  ctx.scale(scale, scale)
+
+  ctx.fillStyle = '#8a6437'
+  ctx.beginPath()
+  ctx.moveTo(-1.6, 1)
+  ctx.quadraticCurveTo(-3, -7, -1, -15)
+  ctx.lineTo(1, -15)
+  ctx.quadraticCurveTo(3, -7, 1.6, 1)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.fillStyle = '#2f8f46'
+  const frondAngles = [-150, -110, -80, -50, -10]
+  for (const deg of frondAngles) {
+    ctx.save()
+    ctx.translate(0, -15)
+    ctx.rotate((deg * Math.PI) / 180)
+    ctx.beginPath()
+    ctx.moveTo(0, 0)
+    ctx.quadraticCurveTo(6, -2.5, 12, -1)
+    ctx.quadraticCurveTo(6, 1.5, 0, 1)
+    ctx.closePath()
+    ctx.fill()
+    ctx.restore()
+  }
+
+  ctx.restore()
+}
+
+// A small isometric boulder made of two flat-shaded facets.
+function drawRock(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 0.8 * scale, 5.5 * scale, 1.8 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.translate(x, y)
+  ctx.scale(scale, scale)
+
+  ctx.fillStyle = '#6e6a63'
+  ctx.beginPath()
+  ctx.moveTo(-6, 1)
+  ctx.lineTo(-5, -4)
+  ctx.lineTo(-1, -7)
+  ctx.lineTo(4, -6)
+  ctx.lineTo(6, -1)
+  ctx.lineTo(3, 2)
+  ctx.lineTo(-3, 2)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.fillStyle = '#87837b'
+  ctx.beginPath()
+  ctx.moveTo(-1, -7)
+  ctx.lineTo(4, -6)
+  ctx.lineTo(2, -3)
+  ctx.lineTo(-2, -3)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.restore()
+}
+
+// A small blocky cactus for the highest track-detail tier. "twin" draws two slimmer arms-free
+// stalks instead of one two-armed cactus, for visual variety along the track.
+function drawCactus(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, twin: boolean) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 1 * scale, 4 * scale, 1.5 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.translate(x, y)
+  ctx.scale(scale, scale)
+  ctx.fillStyle = '#2f8f46'
+
+  if (twin) {
+    ctx.fillRect(-4, -11, 2.6, 13)
+    ctx.fillRect(0.5, -15, 2.6, 17)
+  } else {
+    ctx.fillRect(-1.5, -14, 3, 16)
+    ctx.fillRect(-4.5, -8, 3, 6)
+    ctx.fillRect(-4.5, -9, 4.5, 3)
+    ctx.fillRect(1.5, -11, 3, 6)
+    ctx.fillRect(0, -12, 4.5, 3)
+  }
+
+  ctx.restore()
+}
+
+// A low desert bush - an alternative to a rock so speed-tier decoration isn't just boulders.
+function drawBush(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 0.6 * scale, 4.5 * scale, 1.5 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.translate(x, y)
+  ctx.scale(scale, scale)
+  ctx.fillStyle = '#3d6b2f'
+  ctx.beginPath()
+  ctx.ellipse(-2, -1, 3, 2.2, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.ellipse(2, -1.5, 3.2, 2.4, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = '#4d8038'
+  ctx.beginPath()
+  ctx.ellipse(0, -3, 3, 2, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.restore()
+}
+
+// A dashed dirt-trail streak drawn along a track segment's centerline.
+function drawTrail(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  ctx.save()
+  ctx.strokeStyle = 'rgba(210, 190, 150, 0.6)'
+  ctx.lineWidth = 1.6
+  ctx.setLineDash([3, 3])
+  ctx.beginPath()
+  ctx.moveTo(x0, y0)
+  ctx.lineTo(x1, y1)
+  ctx.stroke()
   ctx.restore()
 }
 
@@ -176,13 +425,15 @@ function draw() {
   if (points.length < 2) return
 
   // Bucket the whole run by position around the lap so each stretch of track
-  // remembers the incline ("altitude") that was recorded there, across laps.
+  // remembers the incline ("altitude") and speed that were recorded there, across laps.
   const bucketIncline = new Array(NUM_BUCKETS).fill(0)
+  const bucketSpeed = new Array(NUM_BUCKETS).fill(0)
   const bucketVisited = new Array(NUM_BUCKETS).fill(false)
   for (const p of points) {
     const posKm = ((p.distance % LAP_KM) + LAP_KM) % LAP_KM
     const idx = Math.min(NUM_BUCKETS - 1, Math.floor((posKm / LAP_KM) * NUM_BUCKETS))
     bucketIncline[idx] = p.incline
+    bucketSpeed[idx] = p.speed
     bucketVisited[idx] = true
   }
 
@@ -236,80 +487,144 @@ function draw() {
     }
   }
 
-  // Depth-sort buckets so farther segments of the loop are painted first.
-  const order = Array.from({ length: NUM_BUCKETS }, (_, i) => i)
-    .sort((a, b) => {
-      const pa = trackPoint((a + 0.5) / NUM_BUCKETS)
-      const pb = trackPoint((b + 0.5) / NUM_BUCKETS)
-      return (pa.x + pa.z) - (pb.x + pb.z)
-    })
+  // Every drawable (track buckets, field props, the runner) gets a depth key so the
+  // whole scene is painter's-algorithm sorted together, instead of per-category - which is
+  // what let props and the dino clip through the terrain before.
+  type Task = { depth: number; draw: () => void }
+  const tasks: Task[] = []
 
-  for (const i of order) {
+  for (let i = 0; i < NUM_BUCKETS; i++) {
     const f0 = i / NUM_BUCKETS
     const f1 = (i + 1) / NUM_BUCKETS
     const p0 = trackPoint(f0)
     const p1 = trackPoint(f1)
+    const mid = trackPoint((i + 0.5) / NUM_BUCKETS)
     const inner0 = { x: p0.x - p0.nx * HALF_WIDTH_WORLD, z: p0.z - p0.nz * HALF_WIDTH_WORLD }
     const outer0 = { x: p0.x + p0.nx * HALF_WIDTH_WORLD, z: p0.z + p0.nz * HALF_WIDTH_WORLD }
     const inner1 = { x: p1.x - p1.nx * HALF_WIDTH_WORLD, z: p1.z - p1.nz * HALF_WIDTH_WORLD }
     const outer1 = { x: p1.x + p1.nx * HALF_WIDTH_WORLD, z: p1.z + p1.nz * HALF_WIDTH_WORLD }
 
-    // Flat track surface (ground).
-    const gi0 = project(inner0.x, inner0.z, 0)
-    const gi1 = project(inner1.x, inner1.z, 0)
-    const go1 = project(outer1.x, outer1.z, 0)
-    const go0 = project(outer0.x, outer0.z, 0)
-    ctx.beginPath()
-    ctx.moveTo(gi0.x, gi0.y)
-    ctx.lineTo(gi1.x, gi1.y)
-    ctx.lineTo(go1.x, go1.y)
-    ctx.lineTo(go0.x, go0.y)
-    ctx.closePath()
-    ctx.fillStyle = i % 2 === 0 ? '#2b2b2b' : '#272727'
-    ctx.fill()
-
     const visited = bucketVisited[i]
     const h = visited ? heightFor(bucketIncline[i]) : 0
-    if (h > 0.5) {
-      // Elevation "hill" sitting on the outer edge of the track for this stretch.
-      const wall0 = project(outer0.x, outer0.z, 0)
-      const wall1 = project(outer1.x, outer1.z, 0)
-      const wallTop0 = project(outer0.x, outer0.z, h)
-      const wallTop1 = project(outer1.x, outer1.z, h)
-      ctx.beginPath()
-      ctx.moveTo(wall0.x, wall0.y)
-      ctx.lineTo(wall1.x, wall1.y)
-      ctx.lineTo(wallTop1.x, wallTop1.y)
-      ctx.lineTo(wallTop0.x, wallTop0.y)
-      ctx.closePath()
-      ctx.fillStyle = inclineColor(bucketIncline[i], 0.65)
-      ctx.fill()
 
-      const topInner0 = project(inner0.x, inner0.z, h)
-      const topInner1 = project(inner1.x, inner1.z, h)
-      ctx.beginPath()
-      ctx.moveTo(topInner0.x, topInner0.y)
-      ctx.lineTo(topInner1.x, topInner1.y)
-      ctx.lineTo(wallTop1.x, wallTop1.y)
-      ctx.lineTo(wallTop0.x, wallTop0.y)
-      ctx.closePath()
-      ctx.fillStyle = inclineColor(bucketIncline[i], 1)
-      ctx.fill()
-    }
+    tasks.push({
+      depth: mid.x + mid.z,
+      draw: () => {
+        // Flat track surface (ground).
+        const gi0 = project(inner0.x, inner0.z, 0)
+        const gi1 = project(inner1.x, inner1.z, 0)
+        const go1 = project(outer1.x, outer1.z, 0)
+        const go0 = project(outer0.x, outer0.z, 0)
+        ctx.beginPath()
+        ctx.moveTo(gi0.x, gi0.y)
+        ctx.lineTo(gi1.x, gi1.y)
+        ctx.lineTo(go1.x, go1.y)
+        ctx.lineTo(go0.x, go0.y)
+        ctx.closePath()
+        ctx.fillStyle = i % 2 === 0 ? '#2b2b2b' : '#272727'
+        ctx.fill()
 
-    // Draw the runner right after its own bucket so it layers correctly with the terrain.
-    const posKm = ((distanceKm.value % LAP_KM) + LAP_KM) % LAP_KM
-    const runnerFraction = posKm / LAP_KM
-    if (runnerFraction >= f0 && runnerFraction < f1) {
-      const rp = trackPoint(runnerFraction)
-      const runnerHeight = visited ? heightFor(bucketIncline[i]) : 0
-      const base = project(rp.x, rp.z, runnerHeight)
-      const ahead = project(rp.x + rp.tx * 4, rp.z + rp.tz * 4, runnerHeight)
-      const angle = Math.atan2(ahead.y - base.y, ahead.x - base.x)
-      const runFrame = Math.floor(Date.now() / 200) % 2
-      drawDino(ctx, base.x, base.y, angle, Math.max(0.8, scale * 0.45), runFrame)
-    }
+        if (h > 0.5) {
+          const wallTop0 = project(outer0.x, outer0.z, h)
+          const wallTop1 = project(outer1.x, outer1.z, h)
+          const topInner0 = project(inner0.x, inner0.z, h)
+          const topInner1 = project(inner1.x, inner1.z, h)
+
+          // Outer wall (away from the infield).
+          const wall0 = project(outer0.x, outer0.z, 0)
+          const wall1 = project(outer1.x, outer1.z, 0)
+          ctx.beginPath()
+          ctx.moveTo(wall0.x, wall0.y)
+          ctx.lineTo(wall1.x, wall1.y)
+          ctx.lineTo(wallTop1.x, wallTop1.y)
+          ctx.lineTo(wallTop0.x, wallTop0.y)
+          ctx.closePath()
+          ctx.fillStyle = inclineColor(bucketIncline[i], 0.65)
+          ctx.fill()
+
+          // Inner wall (toward the infield) - this face was previously missing.
+          const innerWall0 = project(inner0.x, inner0.z, 0)
+          const innerWall1 = project(inner1.x, inner1.z, 0)
+          ctx.beginPath()
+          ctx.moveTo(innerWall0.x, innerWall0.y)
+          ctx.lineTo(innerWall1.x, innerWall1.y)
+          ctx.lineTo(topInner1.x, topInner1.y)
+          ctx.lineTo(topInner0.x, topInner0.y)
+          ctx.closePath()
+          ctx.fillStyle = inclineColor(bucketIncline[i], 0.5)
+          ctx.fill()
+
+          // Hill top surface.
+          ctx.beginPath()
+          ctx.moveTo(topInner0.x, topInner0.y)
+          ctx.lineTo(topInner1.x, topInner1.y)
+          ctx.lineTo(wallTop1.x, wallTop1.y)
+          ctx.lineTo(wallTop0.x, wallTop0.y)
+          ctx.closePath()
+          ctx.fillStyle = inclineColor(bucketIncline[i], 1)
+          ctx.fill()
+        }
+
+        // Track detail grows denser with the speed recorded at this stretch: rocks/bushes, then a
+        // dust trail, then cacti - each tier keeps the previous tier's detail. Every choice below
+        // is seeded off the bucket index so neighboring buckets don't all render the same prop.
+        const tier = trackTier(visited ? bucketSpeed[i] : 0)
+        if (tier >= 1) {
+          const countRoll = hashSeed(i * 3 + 1)
+          const propCount = countRoll < 0.15 ? 0 : countRoll < 0.65 ? 1 : 2
+          for (let k = 0; k < propCount; k++) {
+            const sideRoll = hashSeed(i * 7 + k * 2) * 2 - 1 // -1..1
+            const sizeRoll = 0.16 + hashSeed(i * 13 + k * 5) * 0.14
+            const alongRoll = 0.3 + hashSeed(i * 17 + k * 3) * 0.4
+            const propX = p0.x + (p1.x - p0.x) * alongRoll + mid.nx * HALF_WIDTH_WORLD * sideRoll * 0.7
+            const propZ = p0.z + (p1.z - p0.z) * alongRoll + mid.nz * HALF_WIDTH_WORLD * sideRoll * 0.7
+            const propPos = project(propX, propZ, h)
+            if (hashSeed(i * 23 + k * 7) < 0.5) drawRock(ctx, propPos.x, propPos.y, scale * sizeRoll)
+            else drawBush(ctx, propPos.x, propPos.y, scale * sizeRoll)
+          }
+        }
+        if (tier >= 2) {
+          const trailA = project(p0.x, p0.z, h)
+          const trailB = project(p1.x, p1.z, h)
+          drawTrail(ctx, trailA.x, trailA.y, trailB.x, trailB.y)
+        }
+        if (tier >= 3) {
+          const cactusPos = project(mid.x - mid.nx * HALF_WIDTH_WORLD * 0.4, mid.z - mid.nz * HALF_WIDTH_WORLD * 0.4, h)
+          drawCactus(ctx, cactusPos.x, cactusPos.y, scale * 0.3)
+        }
+      }
+    })
   }
+
+  for (const deco of FIELD_DECORATIONS) {
+    const p = project(deco.x, deco.z, 0)
+    tasks.push({
+      depth: deco.x + deco.z,
+      draw: () => {
+        if (deco.type === 'palm') drawPalm(ctx, p.x, p.y, deco.s * scale * 0.4)
+        else drawRock(ctx, p.x, p.y, deco.s * scale * 0.4)
+      }
+    })
+  }
+
+  const posKm = ((distanceKm.value % LAP_KM) + LAP_KM) % LAP_KM
+  const runnerFraction = posKm / LAP_KM
+  const runnerBucket = Math.min(NUM_BUCKETS - 1, Math.floor(runnerFraction * NUM_BUCKETS))
+  const rp = trackPoint(runnerFraction)
+  const runnerVisited = bucketVisited[runnerBucket]
+  const runnerHeight = runnerVisited ? heightFor(bucketIncline[runnerBucket]) : 0
+  const base = project(rp.x, rp.z, runnerHeight)
+  const ahead = project(rp.x + rp.tx * 4, rp.z + rp.tz * 4, runnerHeight)
+  const facingRight = ahead.x >= base.x
+  const runFrame = Math.floor(Date.now() / 200) % 2
+  const currentSpeed = points[points.length - 1]!.speed
+
+  // The runner's single depth key ties with (or loses to) the wide terrain quad it stands
+  // on, so it would occasionally sort behind the very hill it's running on. Draw it last,
+  // on top of the whole scene, so it never disappears behind the track.
+  tasks.sort((a, b) => a.depth - b.depth)
+  for (const task of tasks) task.draw()
+  drawDino(ctx, base.x, base.y, facingRight, Math.max(1.1, scale * 0.65), runFrame, dinoTier(currentSpeed))
 }
 
 function loop() {
@@ -352,11 +667,6 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
 }
 
-.lap-info {
-  margin-left: auto;
-  color: #999;
-}
-
 .legend {
   display: inline-flex;
   align-items: center;
@@ -382,6 +692,8 @@ onBeforeUnmount(() => {
   position: relative;
   width: 100%;
   height: 280px;
+  flex: 1;
+  min-height: 0;
 }
 
 .chart-wrapper canvas {
