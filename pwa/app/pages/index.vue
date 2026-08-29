@@ -267,14 +267,16 @@ header {
 }
 
 .badge-connected {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #34A853;
   background: rgba(52, 168, 83, 0.1);
-  padding: 4px 12px;
-  border-radius: 16px;
-  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  text-align: center;
 }
 
 .link-btn {
