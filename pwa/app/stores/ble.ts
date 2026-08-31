@@ -375,8 +375,8 @@ export const useBleStore = defineStore('ble', {
         if (!this.connected || !this.writeChar) return
         
         // Strict safety limits
-        if (kph > 12.0) {
-            kph = 12.0
+        if (kph > 10.0) {
+            kph = 10.0
         }
         if (kph > this.speedKph + 2.0) {
             kph = this.speedKph + 2.0
