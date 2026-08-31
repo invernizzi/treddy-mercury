@@ -235,17 +235,6 @@ async function syncWorkout() {
     isSyncing.value = false
   }
 }
-
-async function syncWorkout() {
-  if (bleStore.status === 'Demo Mode' || bleStore.demoInterval) {
-    syncMessage.value = 'Demo data cannot be synced to Google Health'
-    syncError.value = true
-    return
-  }
-
-  await syncWorkout()
-  bleStore.disconnect()
-}
 </script>
 
 <style scoped>
