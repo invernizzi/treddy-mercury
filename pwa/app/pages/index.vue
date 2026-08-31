@@ -95,7 +95,7 @@
           <span v-if="bleStore.status !== 'Disconnected'" class="spinner"></span>
           {{ bleStore.status === 'Disconnected' ? 'Connect Treadmill' : bleStore.status }}
         </button>
-        <button @click="bleStore.startDemo()" class="secondary" style="margin-left: 10px;">
+        <button @click="bleStore.startDemo()" class="secondary" >
           Start Demo
         </button>
         <button 
@@ -103,7 +103,7 @@
           @click="syncWorkout" 
           :disabled="isSyncing"
           class="sync-btn"
-          style="margin-left: 10px;"
+          
         >
           {{ isSyncing ? 'Syncing...' : 'Sync Previous Workout' }}
         </button>
@@ -116,7 +116,7 @@
         >
           {{ isSyncing ? 'Syncing...' : 'Sync Workout (Live)' }}
         </button>
-        <button @click="bleStore.disconnect()" class="danger" style="margin-left: 10px;">
+        <button @click="bleStore.disconnect()" class="danger" >
           Disconnect
         </button>
       </template>
@@ -516,6 +516,8 @@ header {
   margin-top: 0.75rem;
   display: flex;
   justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
   padding-bottom: 0.5rem;
 }
 
@@ -561,6 +563,27 @@ button.danger:hover {
   border-top-color: white;
   animation: spin 1s linear infinite;
   margin-right: 8px;
+}
+
+@media (max-width: 600px) {
+  .dashboard-container {
+    padding: 10px;
+  }
+
+  .value {
+    font-size: 1.6rem !important;
+  }
+
+  .controls button {
+    flex: 1 1 100%;
+    padding: 12px 14px;
+  }
+
+  .controls {
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
 }
 
 @keyframes spin {
