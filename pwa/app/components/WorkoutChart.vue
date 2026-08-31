@@ -51,8 +51,10 @@ const MAX_HEIGHT_WORLD = 22
 
 // Static decorative props scattered across the infield, given fixed world positions
 // so they stay put lap after lap instead of jittering every frame.
-const FIELD_DECORATIONS: { x: number; z: number; type: 'palm' | 'rock' | 'ptero'; s: number }[] = [
+const FIELD_DECORATIONS: { x: number; z: number; type: 'palm' | 'rock' | 'ptero' | 'turtle'; s: number }[] = [
   { x: 45, z: 20, type: 'palm', s: 1.1 },
+  { x: 48, z: 22, type: 'turtle', s: 0.9 },
+  { x: 74, z: 12, type: 'turtle', s: 1.0 },
   { x: 60, z: 45, type: 'rock', s: 0.9 },
   { x: 75, z: 15, type: 'palm', s: 0.9 },
   { x: 50, z: 40, type: 'rock', s: 1.2 },
@@ -303,6 +305,9 @@ function drawPalm(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
 
   ctx.translate(x, y)
   ctx.scale(scale, scale)
+  const time = Date.now() / 1000;
+  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
+  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
 
   ctx.fillStyle = '#8a6437'
   ctx.beginPath()
@@ -341,6 +346,8 @@ function drawRock(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
 
   ctx.translate(x, y)
   ctx.scale(scale, scale)
+  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
+  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
 
   ctx.fillStyle = '#6e6a63'
   ctx.beginPath()
@@ -377,6 +384,8 @@ function drawCactus(ctx: CanvasRenderingContext2D, x: number, y: number, scale: 
 
   ctx.translate(x, y)
   ctx.scale(scale, scale)
+  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
+  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
   ctx.fillStyle = '#2f8f46'
 
   if (twin) {
@@ -415,6 +424,8 @@ function drawBush(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
 
   ctx.translate(x, y)
   ctx.scale(scale, scale)
+  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
+  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
   ctx.fillStyle = '#3d6b2f'
   ctx.beginPath()
   ctx.ellipse(-2, -1, 3, 2.2, 0, 0, Math.PI * 2)
@@ -446,6 +457,8 @@ function drawPtero(ctx: CanvasRenderingContext2D, x: number, y: number, scale: n
   ctx.translate(0, floatOffs)
 
   ctx.scale(scale, scale)
+  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
+  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
   ctx.fillStyle = '#6d8e8b' // Cool grey/green ptero color
 
   // Body
@@ -482,6 +495,32 @@ function drawPtero(ctx: CanvasRenderingContext2D, x: number, y: number, scale: n
 }
 
 // A dashed dirt-trail streak drawn along a track segment's centerline.
+// A turtle that hides as a rock but occasionally moves sporadically
+function drawTurtle(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 2 * scale, 4 * scale, 2 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.translate(x, y)
+  ctx.scale(scale, scale)
+  const out = Math.sin(time * 0.5 + x) > 0.7
+  if (out) {
+    ctx.fillStyle = '#4c6c4c'
+    ctx.beginPath()
+    ctx.ellipse(-5, -0.5, 2, 1.5, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.ellipse(-3, 1, 1.5, 1, 0, 0, Math.PI * 2)
+    ctx.ellipse(2.5, 1, 1.5, 1, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.fillStyle = '#1e381b'
+  ctx.beginPath()
+  ctx.ellipse(0, -1.5, 4.5, 2.8, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
 function drawTrail(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
   ctx.save()
   ctx.strokeStyle = 'rgba(210, 190, 150, 0.6)'
@@ -744,21 +783,30 @@ function draw() {
     let pz = deco.z
     
     if (deco.type === 'ptero') {
-      // Pterodactyls fly across the map!
       const time = Date.now() / 1000
-      const SPEED = 15
-      px = ((deco.x - time * SPEED) % 150 + 150) % 150
-      pz = ((deco.z - (time * SPEED * 0.5)) % 100 + 100) % 100
+      const SPEED = 25
+      // Pterodactyls fly across the map!
       // shift so they fly across the visible box rather than just 0-150
-      px -= 20; pz -= 20;
-    }
+      px = ((deco.x - time * SPEED) % 200 + 200) % 200
+      pz = ((deco.z + time * SPEED) % 200 + 200) % 200
+      px -= 50; pz -= 50;
 
+    } else if (deco.type === 'turtle') {
+      const time = Date.now() / 1000
+      const cycle = time * 0.5 + deco.x
+      const step = Math.floor(cycle) * 4
+      const frac = cycle - Math.floor(cycle)
+      const burst = frac > 0.7 ? (frac - 0.7) / 0.3 * 4 : 0
+      px = ((deco.x - (step + burst)) % 120 + 120) % 120
+      pz = ((deco.z + (step + burst)) % 120 + 120) % 120
+    }
     const p = project(px, pz, 0)
     tasks.push({
       depth: px + pz,
       draw: () => {
         if (deco.type === 'palm') drawPalm(ctx, p.x, p.y, deco.s * scale * 0.4)
         else if (deco.type === 'rock') drawRock(ctx, p.x, p.y, deco.s * scale * 0.4)
+        else if (deco.type === 'turtle') drawTurtle(ctx, p.x, p.y, deco.s * scale * 0.4)
         else if (deco.type === 'ptero') drawPtero(ctx, p.x, p.y - 18 * scale, deco.s * scale * 0.4)
       }
     })
