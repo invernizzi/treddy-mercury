@@ -2,7 +2,6 @@ import { defineEventHandler, readBody, createError } from 'h3'
 import {
   getSessionCookie,
   getValidAccessToken,
-  writeActiveEnergyBurned,
   clearSessionCookie,
   GOOGLE_HEALTH_SCOPE
 } from '../utils/google'
@@ -54,7 +53,6 @@ export default defineEventHandler(async (event) => {
         hasGps: false
       },
       metricsSummary: {
-        caloriesKcal: calories,
         distanceMillimeters: distanceMeters * 1000,
         averageSpeedMillimetersPerSecond: (distanceMeters * 1000) / activeDurationSeconds
       }
@@ -80,10 +78,6 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  if (calories > 0) {
-    try {
-      await writeActiveEnergyBurned(token, startTimeMillis, endTimeMillis, calories)
-    } catch (err) {
       console.warn('Could not write active-energy-burned data point:', err)
     }
   }
@@ -152,45 +146,6 @@ export default defineEventHandler(async (event) => {
       console.warn('Could not insert speed dataset:', err)
     }
 
-    // 5. Write Steps dataset
-    try {
-      const stepsStreamId = await getOrCreateDataSource(
-        token,
-        'com.google.step_count.delta',
-        'treadmill_steps'
-      )
-
-      // Estimate steps based on distance (approx 0.78m per step)
-      const estimatedSteps = Math.floor(distanceMeters / 0.78)
-      const stepsDataset = {
-        dataSourceId: stepsStreamId,
-        minStartTimeNs: startTimeNanos.toString(),
-        maxEndTimeNs: endTimeNanos.toString(),
-        point: [
-          {
-            dataTypeName: 'com.google.step_count.delta',
-            startTimeNanos: startTimeNanos.toString(),
-            endTimeNanos: endTimeNanos.toString(),
-            value: [{ intVal: estimatedSteps }]
-          }
-        ]
-      }
-
-      const patchUrl = `https://www.googleapis.com/fitness/v1/users/me/dataSources/${encodeURIComponent(
-        stepsStreamId
-      )}/datasets/${startTimeNanos}-${endTimeNanos}`
-
-      await fetch(patchUrl, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(stepsDataset)
-      })
-    } catch (err) {
-      console.warn('Could not insert steps dataset:', err)
-    }
   }
 
   return {
