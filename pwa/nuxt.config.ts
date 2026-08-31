@@ -39,6 +39,7 @@ export default defineNuxtConfig({
       ]
     },
     workbox: {
+      navigateFallback: null,
       navigateFallbackDenylist: [/^\/api\//],
     },
     devOptions: {
