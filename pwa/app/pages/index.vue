@@ -207,7 +207,8 @@ async function syncWorkout() {
           startTimeMillis,
           endTimeMillis,
           distanceKm: bleStore.distanceKm,
-          calories: bleStore.calories
+          calories: bleStore.calories,
+          history: bleStore.history
         }
       }
     )
