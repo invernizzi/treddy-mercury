@@ -108,11 +108,11 @@
       </template>
       <template v-else>
         <button 
-          @click="endAndSync" 
+          @click="syncWorkout" 
           :disabled="isSyncing"
           class="sync-btn"
         >
-          {{ isSyncing ? 'Syncing...' : 'End & Sync Workout' }}
+          {{ isSyncing ? 'Syncing...' : 'Sync Workout (Live)' }}
         </button>
         <button @click="bleStore.disconnect()" class="danger" style="margin-left: 10px;">
           Disconnect
@@ -182,6 +182,12 @@ async function logoutGoogle() {
 }
 
 async function syncWorkout() {
+  if (bleStore.status === 'Demo Mode' || bleStore.demoInterval) {
+    syncMessage.value = 'Demo data cannot be synced to Google Health'
+    syncError.value = true
+    return
+  }
+
   if (!googleConnected.value) {
     syncMessage.value = 'Please connect Google Health first'
     syncError.value = true
@@ -193,9 +199,9 @@ async function syncWorkout() {
   syncError.value = false
 
   try {
-    const durationMillis = Math.max(1000, bleStore.workoutSeconds * 1000)
+    const startTimeMillis = bleStore.startTime > 0 ? bleStore.startTime : (Date.now() - Math.max(1000, bleStore.workoutSeconds * 1000))
     const endTimeMillis = Date.now()
-    const startTimeMillis = endTimeMillis - durationMillis
+    const durationMillis = endTimeMillis - startTimeMillis
     const currentTimeStr = bleStore.timeStr
 
     const res = await $fetch<{ success: boolean; distanceKm: number; calories: number }>(
@@ -230,7 +236,13 @@ async function syncWorkout() {
   }
 }
 
-async function endAndSync() {
+async function syncWorkout() {
+  if (bleStore.status === 'Demo Mode' || bleStore.demoInterval) {
+    syncMessage.value = 'Demo data cannot be synced to Google Health'
+    syncError.value = true
+    return
+  }
+
   await syncWorkout()
   bleStore.disconnect()
 }
