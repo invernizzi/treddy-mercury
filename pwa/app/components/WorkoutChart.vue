@@ -346,8 +346,6 @@ function drawRock(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
 
   ctx.translate(x, y)
   ctx.scale(scale, scale)
-  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
-  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
 
   ctx.fillStyle = '#6e6a63'
   ctx.beginPath()
@@ -384,8 +382,6 @@ function drawCactus(ctx: CanvasRenderingContext2D, x: number, y: number, scale: 
 
   ctx.translate(x, y)
   ctx.scale(scale, scale)
-  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
-  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
   ctx.fillStyle = '#2f8f46'
 
   if (twin) {
@@ -424,8 +420,6 @@ function drawBush(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
 
   ctx.translate(x, y)
   ctx.scale(scale, scale)
-  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
-  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
   ctx.fillStyle = '#3d6b2f'
   ctx.beginPath()
   ctx.ellipse(-2, -1, 3, 2.2, 0, 0, Math.PI * 2)
@@ -457,8 +451,6 @@ function drawPtero(ctx: CanvasRenderingContext2D, x: number, y: number, scale: n
   ctx.translate(0, floatOffs)
 
   ctx.scale(scale, scale)
-  const wind = (Math.sin(time + x) + Math.sin((time + x) * 0.45) > 0.8) ? Math.sin(time * 3) : 0;
-  ctx.transform(1, 0, wind * 0.15, 1, 0, 0);
   ctx.fillStyle = '#6d8e8b' // Cool grey/green ptero color
 
   // Body
@@ -504,6 +496,7 @@ function drawTurtle(ctx: CanvasRenderingContext2D, x: number, y: number, scale: 
   ctx.fill()
   ctx.translate(x, y)
   ctx.scale(scale, scale)
+  const time = Date.now() / 1000
   const out = Math.sin(time * 0.5 + x) > 0.7
   if (out) {
     ctx.fillStyle = '#4c6c4c'
