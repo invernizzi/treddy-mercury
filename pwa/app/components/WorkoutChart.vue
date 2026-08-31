@@ -740,13 +740,26 @@ function draw() {
   }
 
   for (const deco of FIELD_DECORATIONS) {
-    const p = project(deco.x, deco.z, 0)
+    let px = deco.x
+    let pz = deco.z
+    
+    if (deco.type === 'ptero') {
+      // Pterodactyls fly across the map!
+      const time = Date.now() / 1000
+      const SPEED = 15
+      px = ((deco.x - time * SPEED) % 150 + 150) % 150
+      pz = ((deco.z - (time * SPEED * 0.5)) % 100 + 100) % 100
+      // shift so they fly across the visible box rather than just 0-150
+      px -= 20; pz -= 20;
+    }
+
+    const p = project(px, pz, 0)
     tasks.push({
-      depth: deco.x + deco.z,
+      depth: px + pz,
       draw: () => {
         if (deco.type === 'palm') drawPalm(ctx, p.x, p.y, deco.s * scale * 0.4)
         else if (deco.type === 'rock') drawRock(ctx, p.x, p.y, deco.s * scale * 0.4)
-        else if (deco.type === 'ptero') drawPtero(ctx, p.x, p.y - 15 * scale, deco.s * scale * 0.4)
+        else if (deco.type === 'ptero') drawPtero(ctx, p.x, p.y - 18 * scale, deco.s * scale * 0.4)
       }
     })
   }
