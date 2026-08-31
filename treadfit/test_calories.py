@@ -1,5 +1,5 @@
 import unittest
-from treadfit.fitbit_upload import calculate_calories
+from treadfit.calories import calculate_calories
 
 
 class TestCalculateCalories(unittest.TestCase):

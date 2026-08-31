@@ -1,40 +1,15 @@
 import asyncio
-import struct
-import collections
-import yaml
 import time
+import os
+import yaml
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Vertical
 from textual.widgets import Header, Footer, Static, Digits, Label
 from textual.reactive import reactive
 from textual import work
-from bleak import BleakScanner, BleakClient
 
-from treadfit.fitbit_upload import calculate_calories, get_user_weight
-
-# Bluetooth Configuration.
-DEVICE_NAME = "I_TL"
-
-# UUIDs
-WRITE_UUID = "00001534-1412-efde-1523-785feabcd123"
-NOTIFY_UUID = "00001535-1412-efde-1523-785feabcd123"
-
-# --- PROTOCOL CONSTANTS ---
-
-# 1. Initialization Sequence.
-INITIALIZATION_SEQUENCE = [
-    "fe022c04",
-    "0012020402280428900701cec4b0aaa2a8949696",
-    "0112aca8a2bad0dccefe14003a52786486a6fc18",
-    "ff08324aa0880200004400000000000000000000",
-]
-
-# 2. Read/Poll Sequence.
-POLL_SEQUENCE = [
-    "fe021403",
-    "001202040210041002000a1b9430000040500080",
-    "ff02182700000000000000000000000000000000",
-]
+from treadfit.fitbit_upload import get_user_weight
+from treadfit.ble import TreadmillClient
 
 
 class MetricDigits(Digits):
@@ -103,17 +78,12 @@ class TreadmillApp(App):
     seconds_total = reactive(0.0)
     calories_burned = reactive(0.0)
     calories_per_hour = reactive(0.0)
-    connection_status = reactive("Disconnected")
 
     def __init__(self):
         super().__init__()
-        self.parsed_events = collections.deque()
-        self.ble_client = None
-        self.stop_event = asyncio.Event()
-        self.user_weight_kg = 86.0  # Default, will fetch
-        self.accumulated_calories = 0.0
-        self.has_synced_initial_state = False
-        self.last_metric_update_time = time.time()
+        self.client = TreadmillClient(
+            metrics_callback=self.on_metrics_update, status_callback=self.update_status
+        )
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -127,11 +97,27 @@ class TreadmillApp(App):
         yield Label("Status: Disconnected", id="status-bar")
         yield Footer()
 
+    def on_metrics_update(self, metrics: dict):
+        self.speed_kph = metrics["speed_kph"]
+        self.incline_deg = metrics["incline_deg"]
+        self.distance_km = metrics["distance_km"]
+        self.seconds_total = metrics["seconds_total"]
+        self.calories_burned = metrics["calories_burned"]
+        self.calories_per_hour = metrics["calories_per_hour"]
+
+    def update_status(self, status: str):
+        try:
+            self.query_one("#status-bar", Label).update(f"Status: {status}")
+        except Exception:
+            pass
+
     async def on_mount(self):
         # Fetch weight in background
         self.fetch_weight_worker()
-        # Start BLE worker
-        self.run_worker(self.ble_worker, exclusive=True)
+        
+        # Start BLE worker and Save Loop
+        self.run_worker(self.client.ble_worker, exclusive=True)
+        self.run_worker(self.save_loop, exclusive=True)
 
     @work(thread=True)
     def fetch_weight_worker(self):
@@ -142,162 +128,11 @@ class TreadmillApp(App):
             pass
 
     def update_weight(self, weight):
-        self.user_weight_kg = weight
+        self.client.set_user_weight(weight)
         self.notify(f"User weight loaded: {weight} kg")
 
-    async def ble_worker(self):
-        while not self.stop_event.is_set():
-            self.connection_status = f"Scanning for '{DEVICE_NAME}'..."
-            self.update_status(self.connection_status)
-
-            device = await BleakScanner.find_device_by_filter(
-                lambda d, ad: d.name and d.name == DEVICE_NAME
-            )
-
-            if not device:
-                self.connection_status = "Device not found. Retrying..."
-                self.update_status(self.connection_status)
-                await asyncio.sleep(5)
-                continue
-
-            self.connection_status = f"Found {device.name}. Connecting..."
-            self.update_status(self.connection_status)
-
-            try:
-                async with BleakClient(device.address) as client:
-                    self.ble_client = client
-                    self.connection_status = "Connected"
-                    self.update_status(self.connection_status)
-                    await asyncio.sleep(0.1)
-
-                    await client.start_notify(NOTIFY_UUID, self.parse_treadmill_data)
-
-                    # Init sequence
-                    for h in INITIALIZATION_SEQUENCE:
-                        await client.write_gatt_char(
-                            WRITE_UUID, bytes.fromhex(h), response=True
-                        )
-                        await asyncio.sleep(0.1)
-
-                    # Start save loop as a concurrent task inside the connection block
-                    save_task = asyncio.create_task(self.save_loop())
-
-                    try:
-                        while client.is_connected and not self.stop_event.is_set():
-                            for hex_cmd in POLL_SEQUENCE:
-                                await client.write_gatt_char(
-                                    WRITE_UUID, bytes.fromhex(hex_cmd), response=True
-                                )
-                            await asyncio.sleep(1.0)
-
-                            # Update derived metrics periodically
-                            self.calculate_realtime_metrics()
-
-                    finally:
-                        save_task.cancel()
-
-            except Exception as e:
-                self.connection_status = f"Error: {e}"
-                self.update_status(self.connection_status)
-                await asyncio.sleep(5)
-
-    def update_status(self, status):
-        self.query_one("#status-bar", Label).update(f"Status: {status}")
-
-    def sync_initial_workout_state(self, distance_km, speed_kph, incline_deg):
-        initial_secs = self.seconds_total
-        if initial_secs <= 0 and speed_kph > 0:
-            initial_secs = (distance_km / speed_kph) * 3600
-        if initial_secs > 0:
-            initial_cals = calculate_calories(
-                self.user_weight_kg, speed_kph, incline_deg, initial_secs
-            )
-            self.accumulated_calories = initial_cals
-            self.calories_burned = self.accumulated_calories
-            if self.seconds_total <= 0:
-                self.seconds_total = initial_secs
-
-    def parse_treadmill_data(self, _sender: int, data: bytearray):
-        if len(data) < 10:
-            return
-
-        match data[0]:
-            case 0x00:
-                if len(data) < 18:
-                    return
-                # Notification message.
-                s = struct.unpack_from("<H", data, 10)[0] / 100.0
-                i = struct.unpack_from("<H", data, 12)[0] / 100.0
-                d = (
-                    struct.unpack_from("<H", data, 16)[0] / 1000.0
-                )  # BLE returns meters? Original code divided by 1000.
-
-                if not self.has_synced_initial_state and d > 0:
-                    self.sync_initial_workout_state(d, s, i)
-                    self.has_synced_initial_state = True
-
-                # Update reactive variables
-                self.update_metrics_00(s, i, d)
-
-            case 0x01:
-                # Notification message - Time received from treadmill.
-                if len(data) >= 11:
-                    treadmill_secs = struct.unpack_from("<H", data, 9)[0]
-                    if treadmill_secs > 0:
-                        if (
-                            not self.has_synced_initial_state
-                            and self.distance_km > 0
-                            and self.accumulated_calories == 0
-                        ):
-                            avg_speed = (
-                                self.speed_kph
-                                if self.speed_kph > 0
-                                else (self.distance_km / treadmill_secs) * 3600
-                            )
-                            self.accumulated_calories = calculate_calories(
-                                self.user_weight_kg,
-                                avg_speed,
-                                self.incline_deg,
-                                treadmill_secs,
-                            )
-                            self.calories_burned = self.accumulated_calories
-                            self.seconds_total = treadmill_secs
-                            self.has_synced_initial_state = True
-                        elif self.seconds_total <= 0:
-                            self.seconds_total = treadmill_secs
-
-    def update_metrics_00(self, s, i, d):
-        self.speed_kph = s
-        self.incline_deg = i
-        self.distance_km = d
-
-    # def update_metrics_01(self, sec):
-    #    self.seconds_total = sec
-
-    def calculate_realtime_metrics(self):
-        # Calculate instantaneous calories and time
-        now = time.time()
-        dt = now - self.last_metric_update_time
-        self.last_metric_update_time = now
-
-        if dt <= 0:
-            return
-
-        # Calculate rate (cal/hour)
-        cal_per_hour = calculate_calories(
-            self.user_weight_kg, self.speed_kph, self.incline_deg, 3600
-        )
-        self.calories_per_hour = cal_per_hour
-
-        # Accumulate total roughly
-        # Only accumulate if speed > 0
-        if self.speed_kph > 0.1:
-            self.accumulated_calories += (cal_per_hour / 3600) * dt
-            self.calories_burned = self.accumulated_calories
-            self.seconds_total += dt
-
     async def save_loop(self):
-        while True:
+        while not self.client.stop_event.is_set():
             await asyncio.sleep(30)
             data = {
                 "timestamp": time.time(),
@@ -307,6 +142,7 @@ class TreadmillApp(App):
                 "seconds_total": self.seconds_total,
             }
             try:
+                os.makedirs("data", exist_ok=True)
                 date_str = time.strftime("%Y-%m-%d", time.localtime(data["timestamp"]))
                 with open(f"data/treadmill_data_{date_str}.yaml", "a") as f:
                     yaml.dump([data], f)
