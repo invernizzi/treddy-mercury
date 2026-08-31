@@ -488,32 +488,54 @@ function drawPtero(ctx: CanvasRenderingContext2D, x: number, y: number, scale: n
 
 // A dashed dirt-trail streak drawn along a track segment's centerline.
 // A turtle that hides as a rock but occasionally moves sporadically
-function drawTurtle(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
+// A turtle that perfectly mimics a rock, moving locally and sporadically
+function drawTurtle(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, isOut: boolean, dx: number, dy: number) {
   ctx.save()
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
+  // Shadow
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'
   ctx.beginPath()
-  ctx.ellipse(x, y + 2 * scale, 4 * scale, 2 * scale, 0, 0, Math.PI * 2)
+  ctx.ellipse(x, y + 1 * scale, 5 * scale, 2 * scale, 0, 0, Math.PI * 2)
   ctx.fill()
   ctx.translate(x, y)
   ctx.scale(scale, scale)
-  const time = Date.now() / 1000
-  const out = Math.sin(time * 0.5 + x) > 0.7
-  if (out) {
+  if (isOut) {
+    // Calculate angle based on dx/dy (screen space)
+    const angle = Math.atan2(dy, dx)
+    ctx.save()
+    ctx.rotate(angle)
     ctx.fillStyle = '#4c6c4c'
+    // Head protruding
     ctx.beginPath()
-    ctx.ellipse(-5, -0.5, 2, 1.5, 0, 0, Math.PI * 2)
+    ctx.ellipse(6, 0, 2.5, 1.8, 0, 0, Math.PI * 2)
     ctx.fill()
-    ctx.ellipse(-3, 1, 1.5, 1, 0, 0, Math.PI * 2)
-    ctx.ellipse(2.5, 1, 1.5, 1, 0, 0, Math.PI * 2)
+    // Tiny legs
+    ctx.ellipse(3, -3, 1.5, 1.5, 0, 0, Math.PI * 2)
+    ctx.ellipse(-3, -3, 1.5, 1.5, 0, 0, Math.PI * 2)
+    ctx.ellipse(3, 3, 1.5, 1.5, 0, 0, Math.PI * 2)
+    ctx.ellipse(-3, 3, 1.5, 1.5, 0, 0, Math.PI * 2)
     ctx.fill()
+    ctx.restore()
   }
-  ctx.fillStyle = '#1e381b'
+  // Exact rock shell
+  ctx.fillStyle = '#6e6a63'
   ctx.beginPath()
-  ctx.ellipse(0, -1.5, 4.5, 2.8, 0, 0, Math.PI * 2)
+  ctx.moveTo(-6, 1)
+  ctx.lineTo(-5, -4)
+  ctx.lineTo(0, -5)
+  ctx.lineTo(4, -3)
+  ctx.lineTo(6, 1)
+  ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = '#8a857d'
+  ctx.beginPath()
+  ctx.moveTo(-6, 1)
+  ctx.lineTo(-2, -2)
+  ctx.lineTo(0, -5)
+  ctx.lineTo(-5, -4)
+  ctx.closePath()
   ctx.fill()
   ctx.restore()
 }
-
 function drawTrail(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
   ctx.save()
   ctx.strokeStyle = 'rgba(210, 190, 150, 0.6)'
@@ -786,12 +808,22 @@ function draw() {
 
     } else if (deco.type === 'turtle') {
       const time = Date.now() / 1000
-      const cycle = time * 0.5 + deco.x
-      const step = Math.floor(cycle) * 4
-      const frac = cycle - Math.floor(cycle)
-      const burst = frac > 0.7 ? (frac - 0.7) / 0.3 * 4 : 0
-      px = ((deco.x - (step + burst)) % 120 + 120) % 120
-      pz = ((deco.z + (step + burst)) % 120 + 120) % 120
+      const slowTime = time * 0.4
+      const isMoving = (slowTime % 1) > 0.8
+      const stepTime = Math.floor(slowTime) + Math.max(0, (slowTime % 1) - 0.8) * 5
+      // bounded random walk using sines, staying within ~5 units of origin
+      const offsetX = Math.sin(stepTime * 1.34 + deco.x) * 5
+      const offsetZ = Math.sin(stepTime * 1.77 + deco.z) * 5
+      px = deco.x + offsetX
+      pz = deco.z + offsetZ
+      // calculate derivative for facing direction
+      const dxW = isMoving ? Math.cos(stepTime * 1.34 + deco.x) * 1.34 : 0
+      const dzW = isMoving ? Math.cos(stepTime * 1.77 + deco.z) * 1.77 : 0
+      const pNext = project(px + dxW, pz + dzW, 0)
+      const pCurr = project(px, pz, 0)
+      deco.isMoving = isMoving
+      deco.dxS = pNext.x - pCurr.x
+      deco.dyS = pNext.y - pCurr.y
     }
     const p = project(px, pz, 0)
     tasks.push({
@@ -799,7 +831,7 @@ function draw() {
       draw: () => {
         if (deco.type === 'palm') drawPalm(ctx, p.x, p.y, deco.s * scale * 0.4)
         else if (deco.type === 'rock') drawRock(ctx, p.x, p.y, deco.s * scale * 0.4)
-        else if (deco.type === 'turtle') drawTurtle(ctx, p.x, p.y, deco.s * scale * 0.4)
+        else if (deco.type === 'turtle') drawTurtle(ctx, p.x, p.y, deco.s * scale * 0.4, !!(deco as any).isMoving, (deco as any).dxS, (deco as any).dyS)
         else if (deco.type === 'ptero') drawPtero(ctx, p.x, p.y - 18 * scale, deco.s * scale * 0.4)
       }
     })
