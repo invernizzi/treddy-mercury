@@ -369,6 +369,62 @@ export const useBleStore = defineStore('ble', {
             this.workoutSeconds += dt
             this.updateTimeStr(Math.floor(this.workoutSeconds))
         }
-    }
+    },
+
+    async setSpeed(kph: number) {
+        if (!this.connected || !this.writeChar) return
+        
+        // Strict safety limits
+        if (kph > 12.0) {
+            kph = 12.0
+        }
+        if (kph > this.speedKph + 2.0) {
+            kph = this.speedKph + 2.0
+        }
+        if (kph < 0) kph = 0
+
+        const speedParam = Math.floor(kph * 100)
+        const pre = hexStringToBytes("fe020d02")
+        const payloadHex = "ff0d020402090409020101" + 
+                          (speedParam & 0xff).toString(16).padStart(2, '0') + 
+                          ((speedParam >> 8) & 0xff).toString(16).padStart(2, '0') + 
+                          "00000000000000"
+        const payloadBytes = hexStringToBytes(payloadHex)
+
+        try {
+            await this.writeChar.writeValue(pre)
+            await new Promise(r => setTimeout(r, 50))
+            await this.writeChar.writeValue(payloadBytes)
+            this.speedKph = kph
+        } catch (e) {
+            console.error("setSpeed error", e)
+        }
+    },
+
+    async setIncline(deg: number) {
+        if (!this.connected || !this.writeChar) return
+        
+        // Logical bounds for treadmill inclines
+        if (deg > 15.0) deg = 15.0
+        if (deg < -3.0) deg = -3.0
+
+        const inclineParam = Math.floor(deg * 100)
+        const pre = hexStringToBytes("fe020d02")
+        const payloadHex = "ff0d020402090409020202" + 
+                          (inclineParam & 0xff).toString(16).padStart(2, '0') + 
+                          ((inclineParam >> 8) & 0xff).toString(16).padStart(2, '0') + 
+                          "00000000000000"
+        const payloadBytes = hexStringToBytes(payloadHex)
+
+        try {
+            await this.writeChar.writeValue(pre)
+            await new Promise(r => setTimeout(r, 50))
+            await this.writeChar.writeValue(payloadBytes)
+            this.inclineDeg = deg
+        } catch (e) {
+            console.error("setIncline error", e)
+        }
+    },
+
   }
 })

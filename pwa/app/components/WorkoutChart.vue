@@ -13,6 +13,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useBleStore } from '~/stores/ble'
 
 interface HistoryPoint {
   t: number
@@ -29,6 +30,11 @@ const wrapperEl = ref<HTMLDivElement | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 let resizeObserver: ResizeObserver | null = null
 let rafId: number | null = null
+const bleStore = useBleStore()
+
+// State for Power-Ups
+let lastConsumedPowerupId: number = -1
+let boostEndTime: number = 0
 
 // The workout is drawn as a fixed-length running track loop instead of a
 // scrolling timeline, so it always fits regardless of how far the run goes -
@@ -45,7 +51,7 @@ const MAX_HEIGHT_WORLD = 22
 
 // Static decorative props scattered across the infield, given fixed world positions
 // so they stay put lap after lap instead of jittering every frame.
-const FIELD_DECORATIONS: { x: number; z: number; type: 'palm' | 'rock'; s: number }[] = [
+const FIELD_DECORATIONS: { x: number; z: number; type: 'palm' | 'rock' | 'ptero'; s: number }[] = [
   { x: 45, z: 20, type: 'palm', s: 1.1 },
   { x: 60, z: 45, type: 'rock', s: 0.9 },
   { x: 75, z: 15, type: 'palm', s: 0.9 },
@@ -55,7 +61,9 @@ const FIELD_DECORATIONS: { x: number; z: number; type: 'palm' | 'rock'; s: numbe
   { x: 65, z: 25, type: 'palm', s: 1.3 },
   { x: 95, z: 30, type: 'rock', s: 1.0 },
   { x: 18, z: 30, type: 'rock', s: 0.8 },
-  { x: 112, z: 30, type: 'palm', s: 1.1 }
+  { x: 112, z: 30, type: 'palm', s: 1.1 },
+  { x: 25, z: 22, type: 'ptero', s: 0.9 },
+  { x: 82, z: 28, type: 'ptero', s: 0.85 }
 ]
 
 const COS30 = Math.cos(Math.PI / 6)
@@ -70,6 +78,7 @@ function iso(wx: number, wz: number, wy: number) {
 const DINO_HAT_SPEED = 5
 const DINO_SPIKES_SPEED = 6
 const DINO_JETPACK_SPEED = 8
+const DINO_SUNGLASSES_SPEED = 10
 
 const TRACK_ROCKS_SPEED = 4
 const TRACK_TRAIL_SPEED = 6
@@ -77,6 +86,7 @@ const TRACK_CACTUS_SPEED = 8
 
 // Tiers are cumulative: each stage keeps the previous stage's accessories/detail and adds more.
 function dinoTier(speed: number): number {
+  if (speed >= DINO_SUNGLASSES_SPEED) return 4
   if (speed >= DINO_JETPACK_SPEED) return 3
   if (speed >= DINO_SPIKES_SPEED) return 2
   if (speed >= DINO_HAT_SPEED) return 1
@@ -234,20 +244,40 @@ function drawDino(ctx: CanvasRenderingContext2D, x: number, y: number, facingRig
     ctx.fill()
   }
 
-  // Jetpack with a flickering flame (tier 3)
+  // Jetpack with dual nozzles and flickering flame (tier 3)
   if (tier >= 3) {
     ctx.fillStyle = '#555'
-    ctx.fillRect(-9, -9, 4, 7)
+    ctx.fillRect(-9, -9, 4, 8)
     ctx.fillStyle = '#777'
-    ctx.fillRect(-9, -9, 4, 1.5)
+    ctx.fillRect(-9, -9, 4, 2)
+    // Nozzles
+    ctx.fillStyle = '#444'
+    ctx.fillRect(-8.5, -1, 1.2, 1.5)
+    ctx.fillRect(-6.7, -1, 1.2, 1.5)
+    // Flames
     ctx.fillStyle = '#ff9800'
-    const flicker = Math.sin(Date.now() / 80) * 0.8
+    const flicker = Math.sin(Date.now() / 80) * 1.5
     ctx.beginPath()
-    ctx.moveTo(-8, -2)
-    ctx.lineTo(-6, -2)
-    ctx.lineTo(-7, 2.5 + flicker)
+    ctx.moveTo(-8.5, 0.5)
+    ctx.lineTo(-7.3, 0.5)
+    ctx.lineTo(-7.9, 3 + flicker)
     ctx.closePath()
     ctx.fill()
+    ctx.beginPath()
+    ctx.moveTo(-6.7, 0.5)
+    ctx.lineTo(-5.5, 0.5)
+    ctx.lineTo(-6.1, 3 + flicker)
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  // Sunglasses (tier 4)
+  if (tier >= 4) {
+    ctx.fillStyle = '#111'
+    ctx.fillRect(5, -11, 4, 2.5) // front lens
+    ctx.fillRect(4, -10.5, 1, 1.5) // connector
+    ctx.fillRect(1, -11, 3, 2.5) // side lens
+    ctx.fillRect(-1, -10.5, 2, 0.8) // side arm
   }
 
   // Legs (alternate stride)
@@ -338,7 +368,7 @@ function drawRock(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
 
 // A small blocky cactus for the highest track-detail tier. "twin" draws two slimmer arms-free
 // stalks instead of one two-armed cactus, for visual variety along the track.
-function drawCactus(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, twin: boolean) {
+function drawCactus(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, twin: boolean, seed: number) {
   ctx.save()
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'
   ctx.beginPath()
@@ -358,6 +388,18 @@ function drawCactus(ctx: CanvasRenderingContext2D, x: number, y: number, scale: 
     ctx.fillRect(-4.5, -9, 4.5, 3)
     ctx.fillRect(1.5, -11, 3, 6)
     ctx.fillRect(0, -12, 4.5, 3)
+  }
+
+  // Draw colorful cactus flowers randomly
+  if (seed > 0.5) {
+    ctx.fillStyle = seed > 0.75 ? '#e91e63' : '#ffeb3b' // Pink or yellow flower
+    if (twin) {
+      ctx.fillRect(-4, -12.5, 2.6, 1.5)
+      ctx.fillRect(0.5, -16.5, 2.6, 1.5)
+    } else {
+      ctx.fillRect(-4.5, -9.5, 1.5, 1.5)
+      ctx.fillRect(3.0, -12.5, 1.5, 1.5)
+    }
   }
 
   ctx.restore()
@@ -388,6 +430,57 @@ function drawBush(ctx: CanvasRenderingContext2D, x: number, y: number, scale: nu
   ctx.restore()
 }
 
+// A simple flying Pterodactyl that casts a shadow below it
+function drawPtero(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number) {
+  ctx.save()
+  
+  // Shadow on ground
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 15 * scale, 5 * scale, 2 * scale, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.translate(x, y)
+  // Animate flying up and down slightly
+  const floatOffs = Math.sin(Date.now() / 300) * 2 * scale
+  ctx.translate(0, floatOffs)
+
+  ctx.scale(scale, scale)
+  ctx.fillStyle = '#6d8e8b' // Cool grey/green ptero color
+
+  // Body
+  ctx.beginPath()
+  ctx.moveTo(2, -4)
+  ctx.lineTo(6, -2)
+  ctx.lineTo(2, 0)
+  ctx.lineTo(-4, -1)
+  ctx.lineTo(-8, -3) // head
+  ctx.lineTo(-4, -4)
+  ctx.closePath()
+  ctx.fill()
+
+  // Beak
+  ctx.fillStyle = '#ffb300'
+  ctx.beginPath()
+  ctx.moveTo(-7, -2.5)
+  ctx.lineTo(-12, -2.5)
+  ctx.lineTo(-7, -1.5)
+  ctx.closePath()
+  ctx.fill()
+
+  // Wings (flap animation)
+  const flap = Math.sin(Date.now() / 150)
+  ctx.fillStyle = '#567572'
+  ctx.beginPath()
+  ctx.moveTo(-1, -3)
+  ctx.lineTo(2, -15 * flap - 5)
+  ctx.lineTo(6, -2)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.restore()
+}
+
 // A dashed dirt-trail streak drawn along a track segment's centerline.
 function drawTrail(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
   ctx.save()
@@ -398,6 +491,46 @@ function drawTrail(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: nu
   ctx.moveTo(x0, y0)
   ctx.lineTo(x1, y1)
   ctx.stroke()
+  ctx.restore()
+}
+
+// A glowing boost pad on the track floor
+function drawPowerup(ctx: CanvasRenderingContext2D, p0: {x: number, y: number}, p1: {x: number, y: number}, scale: number) {
+  ctx.save()
+  
+  const pulse = (Math.sin(Date.now() / 150) + 1) / 2 // 0 to 1
+  
+  ctx.strokeStyle = `rgba(0, 255, 255, ${0.4 + pulse * 0.6})`
+  ctx.lineWidth = 3 * scale
+  
+  // Draw chevron pointing in track direction
+  const dx = p1.x - p0.x
+  const dy = p1.y - p0.y
+  const cx = p0.x + dx * 0.5
+  const cy = p0.y + dy * 0.5
+  const len = Math.sqrt(dx*dx + dy*dy)
+  
+  if (len > 0) {
+    const nx = dx / len
+    const ny = dy / len
+    const perpX = -ny
+    const perpY = nx
+    
+    const size = 3 * scale
+    
+    ctx.beginPath()
+    ctx.moveTo(cx - nx * size + perpX * size, cy - ny * size + perpY * size)
+    ctx.lineTo(cx + nx * size, cy + ny * size)
+    ctx.lineTo(cx - nx * size - perpX * size, cy - ny * size - perpY * size)
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.moveTo(cx - nx * size * 2 + perpX * size, cy - ny * size * 2 + perpY * size)
+    ctx.lineTo(cx, cy)
+    ctx.lineTo(cx - nx * size * 2 - perpX * size, cy - ny * size * 2 - perpY * size)
+    ctx.stroke()
+  }
+  
   ctx.restore()
 }
 
@@ -590,7 +723,17 @@ function draw() {
         }
         if (tier >= 3) {
           const cactusPos = project(mid.x - mid.nx * HALF_WIDTH_WORLD * 0.4, mid.z - mid.nz * HALF_WIDTH_WORLD * 0.4, h)
-          drawCactus(ctx, cactusPos.x, cactusPos.y, scale * 0.3)
+          const isTwin = hashSeed(i * 31) > 0.5
+          drawCactus(ctx, cactusPos.x, cactusPos.y, scale * 0.3, isTwin, hashSeed(i * 47))
+        }
+        if (i === 12 || i === 36) {
+          const lap = Math.floor(distanceKm.value / LAP_KM)
+          const pId = lap * NUM_BUCKETS + i
+          if (pId > lastConsumedPowerupId) {
+            const padA = project(p0.x, p0.z, h)
+            const padB = project(p1.x, p1.z, h)
+            drawPowerup(ctx, padA, padB, scale * 0.8)
+          }
         }
       }
     })
@@ -602,7 +745,8 @@ function draw() {
       depth: deco.x + deco.z,
       draw: () => {
         if (deco.type === 'palm') drawPalm(ctx, p.x, p.y, deco.s * scale * 0.4)
-        else drawRock(ctx, p.x, p.y, deco.s * scale * 0.4)
+        else if (deco.type === 'rock') drawRock(ctx, p.x, p.y, deco.s * scale * 0.4)
+        else if (deco.type === 'ptero') drawPtero(ctx, p.x, p.y - 15 * scale, deco.s * scale * 0.4)
       }
     })
   }
@@ -616,14 +760,39 @@ function draw() {
   const base = project(rp.x, rp.z, runnerHeight)
   const ahead = project(rp.x + rp.tx * 4, rp.z + rp.tz * 4, runnerHeight)
   const facingRight = ahead.x >= base.x
-  const runFrame = Math.floor(Date.now() / 200) % 2
   const currentSpeed = points[points.length - 1]!.speed
+  const lap = Math.floor(distanceKm.value / LAP_KM)
+  if (runnerBucket === 12 || runnerBucket === 36) {
+    const pId = lap * NUM_BUCKETS + runnerBucket
+    if (pId > lastConsumedPowerupId) {
+      lastConsumedPowerupId = pId
+      boostEndTime = Date.now() + 2000
+      bleStore.setSpeed(currentSpeed + 1.0)
+    }
+  }
+
+  const isBoosting = Date.now() < boostEndTime
+  const runFrame = Math.floor(Date.now() / (isBoosting ? 100 : 200)) % 2
 
   // The runner's single depth key ties with (or loses to) the wide terrain quad it stands
   // on, so it would occasionally sort behind the very hill it's running on. Draw it last,
   // on top of the whole scene, so it never disappears behind the track.
   tasks.sort((a, b) => a.depth - b.depth)
   for (const task of tasks) task.draw()
+  
+  if (isBoosting) {
+    // Sprint effect trails
+    ctx.save()
+    ctx.translate(base.x, base.y)
+    ctx.scale(Math.max(1.1, scale * 0.65), Math.max(1.1, scale * 0.65))
+    ctx.fillStyle = 'rgba(0, 255, 255, 0.5)'
+    ctx.beginPath()
+    ctx.ellipse(facingRight ? -8 : 8, -5, 4, 1.5, 0, 0, Math.PI * 2)
+    ctx.ellipse(facingRight ? -12 : 12, -3, 2, 1, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }
+
   drawDino(ctx, base.x, base.y, facingRight, Math.max(1.1, scale * 0.65), runFrame, dinoTier(currentSpeed))
 }
 

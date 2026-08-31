@@ -33,15 +33,23 @@
     <!-- Isometric track is the centerpiece; metrics flank it on both sides -->
     <div class="viz-row">
       <div class="side-column">
-        <div class="card metric-card">
+        <div class="card metric-card interactive-metric">
           <div class="label">SPEED</div>
-          <div class="value accent">{{ bleStore.speedKph.toFixed(1) }}</div>
+          <div class="controls-row">
+            <button @click="bleStore.setSpeed(Math.max(0, bleStore.speedKph - 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">-</button>
+            <div class="value accent">{{ bleStore.speedKph.toFixed(1) }}</div>
+            <button @click="bleStore.setSpeed(Math.min(20, bleStore.speedKph + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
+          </div>
           <div class="unit">km/h</div>
         </div>
 
-        <div class="card metric-card">
+        <div class="card metric-card interactive-metric">
           <div class="label">INCLINE</div>
-          <div class="value">{{ bleStore.inclineDeg.toFixed(1) }}</div>
+          <div class="controls-row">
+            <button @click="bleStore.setIncline(Math.max(0, bleStore.inclineDeg - 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">-</button>
+            <div class="value">{{ bleStore.inclineDeg.toFixed(1) }}</div>
+            <button @click="bleStore.setIncline(Math.min(20, bleStore.inclineDeg + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
+          </div>
           <div class="unit">%</div>
         </div>
 
@@ -486,6 +494,45 @@ header {
   .track-container {
     order: -1;
   }
+}
+
+.controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+
+.ctrl-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.ctrl-btn:hover:not(:disabled) {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.interactive-metric .value {
+  font-size: 1.8rem; /* slightly smaller to fit buttons */
 }
 
 .label {
