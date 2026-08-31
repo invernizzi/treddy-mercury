@@ -244,7 +244,7 @@ async function syncWorkout() {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
   padding: 20px;
   max-width: 1400px;
   margin: 0 auto;
@@ -469,6 +469,7 @@ header {
 @media (max-width: 900px) {
   .viz-row {
     flex-direction: column;
+    min-height: auto;
   }
 
   .side-column {

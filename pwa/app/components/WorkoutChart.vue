@@ -693,7 +693,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 280px;
   flex: 1;
-  min-height: 0;
+  min-height: 200px;
 }
 
 .chart-wrapper canvas {
