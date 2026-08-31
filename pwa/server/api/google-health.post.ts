@@ -78,9 +78,6 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-      console.warn('Could not write active-energy-burned data point:', err)
-    }
-  }
 
   // 4. Write Speed dataset (Average speed)
   const durationSeconds = (endTimeMillis - startTimeMillis) / 1000
