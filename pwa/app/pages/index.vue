@@ -472,6 +472,12 @@ header {
   .side-column {
     width: 100%;
     flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .metric-card, .google-card {
+    flex: 1 1 45%;
+    min-width: 120px;
   }
 
   .track-container {

@@ -212,8 +212,28 @@ export const useBleStore = defineStore('ble', {
         const device = devices.find((d: any) => d.id === lastDeviceId)
         if (!device) return
 
-        this.status = 'Reconnecting to Treadmill...'
-        await this.setupDevice(device)
+        this.status = 'Looking for Treadmill...'
+        
+        if (device.watchAdvertisements) {
+          const abortController = new AbortController()
+          device.addEventListener('advertisementreceived', async () => {
+            abortController.abort()
+            this.status = 'Reconnecting GATT...'
+            try {
+              await this.setupDevice(device)
+            } catch (e) {
+              this.status = 'Disconnected'
+            }
+          }, { once: true })
+          
+          await device.watchAdvertisements({ signal: abortController.signal })
+          setTimeout(() => {
+             abortController.abort()
+             if (!this.connected) this.status = 'Disconnected'
+          }, 10000) // 10 second search
+        } else {
+          await this.setupDevice(device)
+        }
       } catch (e) {
         console.warn('Auto-reconnect failed, manual connect required', e)
         this.status = 'Disconnected'
