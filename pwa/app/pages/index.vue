@@ -89,9 +89,11 @@
     </div>
 
     <div class="controls">
+      <!-- Treadmill NOT Connected -->
       <template v-if="!bleStore.connected">
-        <button @click="bleStore.connect()">
-          Connect to Treadmill
+        <button @click="bleStore.connect()" :disabled="googleConnected === null || bleStore.status !== 'Disconnected'" class="connect-btn">
+          <span v-if="bleStore.status !== 'Disconnected'" class="spinner"></span>
+          {{ bleStore.status === 'Disconnected' ? 'Connect Treadmill' : bleStore.status }}
         </button>
         <button @click="bleStore.startDemo()" class="secondary" style="margin-left: 10px;">
           Start Demo
@@ -542,6 +544,27 @@ button.danger {
 button.danger:hover {
   background: #ff4444;
   color: white;
+}
+
+.connect-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .fade-enter-active,
