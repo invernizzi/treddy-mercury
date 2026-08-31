@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { calculateCalories } from '~/utils/calories'
+import { calculateCalories } from '../utils/calories'
 
 // UUIDs
 const WRITE_UUID = "00001534-1412-efde-1523-785feabcd123"

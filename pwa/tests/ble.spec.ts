@@ -15,7 +15,7 @@ describe('BleStore', () => {
   it('adds an entry to history when speed is > 0.1 during updateRealtimeMetrics', () => {
     const store = useBleStore()
     
-    store.speed = 5.0
+    store.speedKph = 5.0
     store.inclineDeg = 0.0
     store.lastMetricUpdateTime = Date.now() - 2000 // 2 seconds ago
     
