@@ -779,7 +779,10 @@ function draw() {
     const pId = lap * NUM_BUCKETS + runnerBucket
     if (pId > lastConsumedPowerupId) {
       lastConsumedPowerupId = pId
-      boostEndTime = Date.now() + 2000
+      boostEndTime = Date.now() + 30000
+      setTimeout(() => {
+        if (bleStore.speedKph > 0) bleStore.setSpeed(bleStore.speedKph - 1.0)
+      }, 30000)
       bleStore.setSpeed(currentSpeed + 1.0)
     }
   }
