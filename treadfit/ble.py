@@ -15,6 +15,21 @@ DEVICE_NAME = "I_TL"
 # UUIDs
 WRITE_UUID = "00001534-1412-efde-1523-785feabcd123"
 NOTIFY_UUID = "00001535-1412-efde-1523-785feabcd123"
+NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+NUS_TX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+NUS_RX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+
+def build_nus_packet(opcode: int, payload: list[int] | bytes | bytearray = b"") -> bytes:
+    """Builds an NUS protocol packet with framing and checksum.
+
+    Format: [0xA5, Length, Opcode, ...Payload, Checksum]
+    """
+    payload_bytes = bytes(payload)
+    total_len = 4 + len(payload_bytes)
+    frame = bytearray([0xA5, total_len, opcode]) + payload_bytes
+    checksum = sum(frame) & 0xFF
+    frame.append(checksum)
+    return bytes(frame)
 
 # 1. Full Initialization & Unlock Sequences.
 FULL_INITIALIZATION_SEQUENCES = [
@@ -181,6 +196,28 @@ class TreadmillClient:
 
     def parse_treadmill_data(self, _sender: int, data: bytearray):
         if len(data) < 10:
+            return
+
+        # NUS Telemetry check: first byte 0x02, length >= 16, opcode (byte 2) == 0x80
+        if data[0] == 0x02 and len(data) >= 16 and data[2] == 0x80:
+            speed_raw = struct.unpack_from("<H", data, 3)[0]
+            incline_raw = struct.unpack_from("<h", data, 5)[0]
+            dist_meters = data[7] | (data[8] << 8) | (data[9] << 16)
+            status_flags = data[13]
+            is_metric = bool(status_flags & 0x20)
+
+            speed_kph = (speed_raw / 100.0) if is_metric else (speed_raw / 100.0) * 1.609344
+            incline_deg = incline_raw / 10.0
+            distance_km = dist_meters / 1000.0
+
+            if not self.has_synced_initial_state and distance_km > 0:
+                self.sync_initial_workout_state(distance_km, speed_kph, incline_deg)
+                self.has_synced_initial_state = True
+
+            self.speed_kph = speed_kph
+            self.incline_deg = incline_deg
+            self.distance_km = distance_km
+            self._push_metrics()
             return
 
         match data[0]:

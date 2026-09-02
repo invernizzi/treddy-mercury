@@ -1,7 +1,7 @@
 # Treddy Mercury
 
 ## Overview
-Treddy Mercury is a Python-based project designed to reverse engineer the NordicTrack s20i treadmill. It provides a Textual User Interface (TUI) to track running metrics and automatically syncs the data to Fitbit.
+Treddy Mercury is a project designed to control and monitor the NT s20i treadmill. It provides both a Progressive Web App (PWA) and a Textual User Interface (TUI) to track running metrics and sync data.
 
 ## Key Features
 - **Live Dashboard**: Displays real-time speed, incline, distance, time, and calories via a TUI.

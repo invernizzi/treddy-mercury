@@ -1,9 +1,35 @@
 import { defineStore } from 'pinia'
 import { calculateCalories } from '../utils/calories'
 
-// UUIDs
-const WRITE_UUID = "00001534-1412-efde-1523-785feabcd123"
-const NOTIFY_UUID = "00001535-1412-efde-1523-785feabcd123"
+// Service & Characteristic UUIDs
+const NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+const NUS_TX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e" // Write
+const NUS_RX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e" // Notify
+
+const LEGACY_SERVICE_UUID = "00001533-1412-efde-1523-785feabcd123"
+const LEGACY_WRITE_UUID = "00001534-1412-efde-1523-785feabcd123"
+const LEGACY_NOTIFY_UUID = "00001535-1412-efde-1523-785feabcd123"
+
+const OLD_LEGACY_SERVICE_UUID = "00001530-1212-efde-1523-785feabcd123"
+const OLD_LEGACY_WRITE_UUID = "00001531-1212-efde-1523-785feabcd123"
+const OLD_LEGACY_NOTIFY_UUID = "00001532-1212-efde-1523-785feabcd123"
+
+const FTMS_SERVICE_UUID = "00001826-0000-1000-8000-00805f9b34fb"
+
+const ALL_OPTIONAL_SERVICES = [
+  NUS_SERVICE_UUID,
+  LEGACY_SERVICE_UUID,
+  OLD_LEGACY_SERVICE_UUID,
+  FTMS_SERVICE_UUID
+]
+
+export function buildNusPacket(opcode: number, payload: number[] = []): Uint8Array {
+  const totalLen = 4 + payload.length
+  const frame = [0xA5, totalLen, opcode, ...payload]
+  const checksum = frame.reduce((acc, b) => (acc + b) & 0xFF, 0)
+  frame.push(checksum)
+  return new Uint8Array(frame)
+}
 
 const FULL_INITIALIZATION_SEQUENCES: string[][] = [
   // 1. Initial 6 handshake packet pairs
@@ -129,10 +155,13 @@ interface BleState {
   device: any | null
   server: any | null
   writeChar: any | null
+  notifyChar: any | null
   connected: boolean
   status: string
   logs: BleLogEntry[]
   
+  protocolMode: 'nus' | 'legacy'
+
   // Guidance & Handshake Progress
   handshakePhase: 'idle' | 'connecting' | 'services' | 'handshake' | 'unlocked' | 'failed'
   handshakeProgress: HandshakeProgress
@@ -156,6 +185,7 @@ interface BleState {
   startTime: number
   lastMetricUpdateTime: number
   pollInterval: any
+  keepaliveInterval: any
   demoInterval: any
 
   // History of speed/incline/distance samples over the workout, used to plot the chart
@@ -167,9 +197,12 @@ export const useBleStore = defineStore('ble', {
     device: null,
     server: null,
     writeChar: null,
+    notifyChar: null,
     connected: false,
     status: 'Disconnected',
     logs: [],
+
+    protocolMode: 'legacy',
     
     handshakePhase: 'idle',
     handshakeProgress: { current: 0, total: 20, label: 'Ready to connect', percent: 0 },
@@ -191,6 +224,7 @@ export const useBleStore = defineStore('ble', {
     startTime: 0,
     lastMetricUpdateTime: 0,
     pollInterval: null,
+    keepaliveInterval: null,
     demoInterval: null,
 
     history: []
@@ -352,14 +386,12 @@ export const useBleStore = defineStore('ble', {
           label: 'Requesting Bluetooth device pairing...',
           percent: 5
         }
-        this.addLog('Requesting Bluetooth device (filters: acceptAllDevices, optionalServices: [00001533-1412-efde-1523-785feabcd123])...', 'info')
+        this.addLog('Requesting Bluetooth device (filters: acceptAllDevices, optionalServices: ALL_OPTIONAL_SERVICES)...', 'info')
         
         // @ts-ignore
         const device = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
-          optionalServices: [
-             "00001533-1412-efde-1523-785feabcd123" 
-          ]
+          optionalServices: ALL_OPTIONAL_SERVICES
         })
 
         this.addLog(`User selected device: "${device.name || 'Unnamed'}" (${device.id})`, 'info')
@@ -455,22 +487,50 @@ export const useBleStore = defineStore('ble', {
       this.handshakeProgress = {
         current: 2,
         total: totalSteps,
-        label: 'Discovering Primary IF Service & Characteristics...',
+        label: 'Discovering Primary GATT Service & Characteristics...',
         percent: 18
       }
-      this.addLog('Discovering Primary Service 00001533-1412-efde-1523-785feabcd123...', 'info')
-      const service = await server.getPrimaryService("00001533-1412-efde-1523-785feabcd123")
 
-      this.status = 'Getting Characteristics...'
-      const writeChar = await service.getCharacteristic(WRITE_UUID)
-      const notifyChar = await service.getCharacteristic(NOTIFY_UUID)
+      let writeChar: any = null
+      let notifyChar: any = null
+      let mode: 'nus' | 'legacy' = 'legacy'
 
+      // Try discovering NUS (UART Service) first
+      try {
+        this.addLog(`Checking for NUS UART Service (${NUS_SERVICE_UUID})...`, 'info')
+        const service = await server.getPrimaryService(NUS_SERVICE_UUID)
+        writeChar = await service.getCharacteristic(NUS_TX_CHAR_UUID)
+        notifyChar = await service.getCharacteristic(NUS_RX_CHAR_UUID)
+        mode = 'nus'
+        this.addLog('Found NUS UART Service (6E400001)!', 'info')
+      } catch {
+        // Fall back to 1533 legacy service
+        try {
+          this.addLog(`Checking for Primary IF Service (${LEGACY_SERVICE_UUID})...`, 'info')
+          const service = await server.getPrimaryService(LEGACY_SERVICE_UUID)
+          writeChar = await service.getCharacteristic(LEGACY_WRITE_UUID)
+          notifyChar = await service.getCharacteristic(LEGACY_NOTIFY_UUID)
+          mode = 'legacy'
+          this.addLog('Found Primary IF Service (1533)!', 'info')
+        } catch {
+          // Fall back to 1530 older service
+          this.addLog(`Checking for Primary Legacy Service (${OLD_LEGACY_SERVICE_UUID})...`, 'info')
+          const service = await server.getPrimaryService(OLD_LEGACY_SERVICE_UUID)
+          writeChar = await service.getCharacteristic(OLD_LEGACY_WRITE_UUID)
+          notifyChar = await service.getCharacteristic(OLD_LEGACY_NOTIFY_UUID)
+          mode = 'legacy'
+          this.addLog('Found Primary Legacy Service (1530)!', 'info')
+        }
+      }
+
+      this.protocolMode = mode
       this.writeChar = writeChar
+      this.notifyChar = notifyChar
 
       const writeProps = writeChar.properties || {}
-      this.addLog(`Discovered Characteristics: WriteChar=${WRITE_UUID} (write=${writeProps.write}, writeWithoutResponse=${writeProps.writeWithoutResponse}), NotifyChar=${NOTIFY_UUID} (notify=${notifyChar.properties?.notify})`, 'info')
+      this.addLog(`Characteristics bound: WriteChar=${writeChar.uuid} (write=${writeProps.write}, writeWithoutResponse=${writeProps.writeWithoutResponse}), NotifyChar=${notifyChar.uuid} (notify=${notifyChar.properties?.notify}) [Mode=${mode.toUpperCase()}]`, 'info')
 
-      this.addLog('Subscribing to notifications on NotifyChar (1535)...', 'info')
+      this.addLog(`Subscribing to notifications on NotifyChar (${notifyChar.uuid})...`, 'info')
       await notifyChar.startNotifications()
       notifyChar.addEventListener('characteristicvaluechanged', (event: any) => {
         const value = event.target.value
@@ -486,28 +546,78 @@ export const useBleStore = defineStore('ble', {
 
       localStorage.setItem(LAST_DEVICE_ID_KEY, device.id)
 
-      this.addLog(`Sending full IF treadmill handshake & unlock sequence (${FULL_INITIALIZATION_SEQUENCES.length} sequences)...`, 'info')
-      for (let s = 0; s < FULL_INITIALIZATION_SEQUENCES.length; s++) {
-        const seq = FULL_INITIALIZATION_SEQUENCES[s]!
-        const pct = Math.round(20 + ((s + 1) / FULL_INITIALIZATION_SEQUENCES.length) * 78)
-        this.handshakeProgress = {
-          current: s + 3,
-          total: totalSteps,
-          label: `Unlocking Remote Control Mode [Sequence ${s + 1}/${FULL_INITIALIZATION_SEQUENCES.length}]...`,
-          percent: pct
-        }
-        await this.enqueueWrite(async () => {
-          for (let i = 0; i < seq.length; i++) {
-            const hex = seq[i]!
-            await this.writeRaw(hexStringToBytes(hex), `Init[${s + 1}/${FULL_INITIALIZATION_SEQUENCES.length}][${i + 1}/${seq.length}]`)
-            if (i < seq.length - 1) {
-              await new Promise(r => setTimeout(r, 20))
-            }
+      if (mode === 'nus') {
+        this.addLog('Executing NUS handshake, requesting remote control, and starting keepalive watchdog...', 'info')
+
+        // 1. Handshake (0x10)
+        await this.writeRaw(buildNusPacket(0x10), 'NUS_CMD_HANDSHAKE')
+        await new Promise(r => setTimeout(r, 60))
+
+        // 2. Request Exclusive Control (0x15)
+        await this.writeRaw(buildNusPacket(0x15), 'NUS_CMD_REQUEST_CONTROL')
+        await new Promise(r => setTimeout(r, 60))
+
+        // 3. Start Belt Motor in manual mode (0x11)
+        await this.writeRaw(buildNusPacket(0x11, [0x01]), 'NUS_CMD_START_BELT')
+        await new Promise(r => setTimeout(r, 60))
+
+        // Start 250ms Keepalive Watchdog Loop to satisfy the 500ms safety timer
+        this.keepaliveInterval = setInterval(async () => {
+          if (!this.connected || !this.writeChar) return
+          try {
+            const pingPacket = buildNusPacket(0x30, [0x00]) // [0xA5, 0x05, 0x30, 0x00, 0xDA]
+            await this.enqueueWrite(async () => {
+              if (this.writeChar.writeValueWithoutResponse) {
+                await this.writeChar.writeValueWithoutResponse(pingPacket)
+              } else if (this.writeChar.writeValue) {
+                await this.writeChar.writeValue(pingPacket)
+              }
+            })
+          } catch (e: any) {
+            // Background watchdog ping
           }
-        })
-        await new Promise(r => setTimeout(r, 40))
+        }, 250)
+      } else {
+        this.addLog(`Sending full IF treadmill handshake & unlock sequence (${FULL_INITIALIZATION_SEQUENCES.length} sequences)...`, 'info')
+        for (let s = 0; s < FULL_INITIALIZATION_SEQUENCES.length; s++) {
+          const seq = FULL_INITIALIZATION_SEQUENCES[s]!
+          const pct = Math.round(20 + ((s + 1) / FULL_INITIALIZATION_SEQUENCES.length) * 78)
+          this.handshakeProgress = {
+            current: s + 3,
+            total: totalSteps,
+            label: `Unlocking Remote Control Mode [Sequence ${s + 1}/${FULL_INITIALIZATION_SEQUENCES.length}]...`,
+            percent: pct
+          }
+          await this.enqueueWrite(async () => {
+            for (let i = 0; i < seq.length; i++) {
+              const hex = seq[i]!
+              await this.writeRaw(hexStringToBytes(hex), `Init[${s + 1}/${FULL_INITIALIZATION_SEQUENCES.length}][${i + 1}/${seq.length}]`)
+              if (i < seq.length - 1) {
+                await new Promise(r => setTimeout(r, 20))
+              }
+            }
+          })
+          await new Promise(r => setTimeout(r, 40))
+        }
+
+        this.pollInterval = setInterval(async () => {
+           if (!this.connected || !this.writeChar) return
+           try {
+             await this.enqueueWrite(async () => {
+               for (let i = 0; i < POLL_SEQUENCE.length; i++) {
+                 const hex = POLL_SEQUENCE[i]
+                 await this.writeRaw(hexStringToBytes(hex), `Poll[${i + 1}/${POLL_SEQUENCE.length}]`)
+                 await new Promise(r => setTimeout(r, 20))
+               }
+             })
+             this.updateRealtimeMetrics()
+             this.addHistoryPoint()
+           } catch (e: any) {
+             this.addLog(`Poll error: ${e?.message || e}`, 'error')
+             console.error("Poll error", e)
+           }
+        }, 1000)
       }
-      this.addLog('Initialization sequence completed successfully. Remote control unlocked. Treadmill is ready.', 'info')
 
       this.handshakePhase = 'unlocked'
       this.guidanceStep = 5
@@ -521,24 +631,6 @@ export const useBleStore = defineStore('ble', {
       this.status = 'Running'
       this.startTime = Date.now()
       this.lastMetricUpdateTime = Date.now()
-
-      this.pollInterval = setInterval(async () => {
-         if (!this.connected || !this.writeChar) return
-         try {
-           await this.enqueueWrite(async () => {
-             for (let i = 0; i < POLL_SEQUENCE.length; i++) {
-               const hex = POLL_SEQUENCE[i]
-               await this.writeRaw(hexStringToBytes(hex), `Poll[${i + 1}/${POLL_SEQUENCE.length}]`)
-               await new Promise(r => setTimeout(r, 20))
-             }
-           })
-           this.updateRealtimeMetrics()
-           this.addHistoryPoint()
-         } catch (e: any) {
-           this.addLog(`Poll error: ${e?.message || e}`, 'error')
-           console.error("Poll error", e)
-         }
-      }, 1000)
     },
 
     async enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
@@ -601,8 +693,10 @@ export const useBleStore = defineStore('ble', {
       this.status = 'Disconnected'
       this.server = null
       this.writeChar = null
+      this.notifyChar = null
       this.handshakePhase = 'idle'
       if (this.pollInterval) clearInterval(this.pollInterval)
+      if (this.keepaliveInterval) clearInterval(this.keepaliveInterval)
       if (this.demoInterval) clearInterval(this.demoInterval)
 
       if (wasConnected && !this.isManualDisconnect) {
@@ -620,13 +714,39 @@ export const useBleStore = defineStore('ble', {
       const hexStr = bytes.join('')
       const firstByte = data.getUint8(0)
 
-      // Real metrics notification: firstByte 0x00, length >= 18, and operation bytes 8-9 == 0x02, 0x02
-      if (firstByte === 0x00 && data.byteLength >= 18 && data.getUint8(8) === 0x02 && data.getUint8(9) === 0x02) {
+      // NUS Telemetry Notification: firstByte 0x02, length >= 16, opcode (byte 2) == 0x80
+      if (firstByte === 0x02 && data.byteLength >= 16 && data.getUint8(2) === 0x80) {
+        const speedRaw = data.getUint16(3, true)
+        const inclineRaw = data.getInt16(5, true)
+        const d0 = data.getUint8(7)
+        const d1 = data.getUint8(8)
+        const d2 = data.getUint8(9)
+        const distanceMeters = d0 | (d1 << 8) | (d2 << 16)
+        const statusFlags = data.getUint8(13)
+        const isMetric = !!(statusFlags & 0x20)
+
+        // Speed: if imperial, speedRaw is mph * 100 -> convert to kph
+        const speed = isMetric ? (speedRaw / 100.0) : (speedRaw / 100.0) * 1.609344
+        const incline = inclineRaw / 10.0
+        const distance = distanceMeters / 1000.0
+
+        this.addLog(`RX NUS Telemetry: Speed=${speed.toFixed(2)}km/h, Inc=${incline.toFixed(1)}%, Dist=${distance.toFixed(3)}km [${hexStr}]`, 'rx')
+
+        if (!this.hasSyncedInitialState && distance > 0) {
+          this.syncInitialWorkoutState(distance, speed, incline)
+          this.hasSyncedInitialState = true
+        }
+
+        this.speedKph = speed
+        this.inclineDeg = incline
+        this.distanceKm = distance
+      } else if (firstByte === 0x00 && data.byteLength >= 18 && data.getUint8(8) === 0x02 && data.getUint8(9) === 0x02) {
+        // Real legacy metrics notification: firstByte 0x00, length >= 18, and operation bytes 8-9 == 0x02, 0x02
         const speed = data.getUint16(10, true) / 100.0
         const incline = data.getUint16(12, true) / 100.0
         const distance = data.getUint16(16, true) / 1000.0
 
-        this.addLog(`RX Metrics: Speed=${speed.toFixed(2)}km/h, Inc=${incline.toFixed(1)}%, Dist=${distance.toFixed(3)}km [${hexStr}]`, 'rx')
+        this.addLog(`RX Legacy Metrics: Speed=${speed.toFixed(2)}km/h, Inc=${incline.toFixed(1)}%, Dist=${distance.toFixed(3)}km [${hexStr}]`, 'rx')
         
         if (!this.hasSyncedInitialState && distance > 0) {
           this.syncInitialWorkoutState(distance, speed, incline)
@@ -686,7 +806,7 @@ export const useBleStore = defineStore('ble', {
           return
         }
         
-        // Strict safety limits
+        // Strict safety limits: max 10.0 km/h
         if (kph > 10.0) {
             kph = 10.0
         }
@@ -695,18 +815,40 @@ export const useBleStore = defineStore('ble', {
         }
         if (kph < 0) kph = 0
 
-        const speedParam = Math.round(kph * 100)
-        const { header, payload } = buildControlPackets(0x01, speedParam)
-
-        this.addLog(`setSpeed called: target=${kph.toFixed(2)} km/h (param: ${speedParam}) -> Header: ${header}, Payload: ${payload}`, 'info')
+        this.addLog(`setSpeed called: target=${kph.toFixed(2)} km/h [Mode=${this.protocolMode.toUpperCase()}]`, 'info')
 
         if (this.writeChar) {
           try {
-            await this.enqueueWrite(async () => {
-              await this.writeRaw(hexStringToBytes(header), 'SpeedHeader')
-              await new Promise(r => setTimeout(r, 50))
-              await this.writeRaw(hexStringToBytes(payload), 'SpeedPayload')
-            })
+            if (this.protocolMode === 'nus') {
+              const speedMph = kph / 1.609344
+              const rawVal = Math.round(speedMph * 100.0)
+              const payload = [rawVal & 0xFF, (rawVal >> 8) & 0xFF]
+              const packet = buildNusPacket(0x20, payload)
+
+              if (kph > 0 && this.speedKph === 0) {
+                await this.enqueueWrite(async () => {
+                  await this.writeRaw(buildNusPacket(0x11, [0x01]), 'NUS_START_BELT')
+                  await new Promise(r => setTimeout(r, 40))
+                  await this.writeRaw(packet, `NUS_SET_SPEED(${speedMph.toFixed(2)}mph)`)
+                })
+              } else if (kph === 0) {
+                await this.enqueueWrite(async () => {
+                  await this.writeRaw(buildNusPacket(0x12, [0x00]), 'NUS_STOP_BELT')
+                })
+              } else {
+                await this.enqueueWrite(async () => {
+                  await this.writeRaw(packet, `NUS_SET_SPEED(${speedMph.toFixed(2)}mph)`)
+                })
+              }
+            } else {
+              const speedParam = Math.round(kph * 100)
+              const { header, payload } = buildControlPackets(0x01, speedParam)
+              await this.enqueueWrite(async () => {
+                await this.writeRaw(hexStringToBytes(header), 'SpeedHeader')
+                await new Promise(r => setTimeout(r, 50))
+                await this.writeRaw(hexStringToBytes(payload), 'SpeedPayload')
+              })
+            }
             this.addLog(`Speed command (${kph.toFixed(2)} km/h) sent successfully to treadmill write queue`, 'info')
           } catch (e: any) {
             this.addLog(`setSpeed write failed: ${e?.message || e}`, 'error')
@@ -728,18 +870,27 @@ export const useBleStore = defineStore('ble', {
         if (deg > 20.0) deg = 20.0
         if (deg < -3.0) deg = -3.0
 
-        const inclineParam = Math.round(deg * 100)
-        const { header, payload } = buildControlPackets(0x02, inclineParam)
-
-        this.addLog(`setIncline called: target=${deg.toFixed(1)}% (param: ${inclineParam}) -> Header: ${header}, Payload: ${payload}`, 'info')
+        this.addLog(`setIncline called: target=${deg.toFixed(1)}% [Mode=${this.protocolMode.toUpperCase()}]`, 'info')
 
         if (this.writeChar) {
           try {
-            await this.enqueueWrite(async () => {
-              await this.writeRaw(hexStringToBytes(header), 'InclineHeader')
-              await new Promise(r => setTimeout(r, 50))
-              await this.writeRaw(hexStringToBytes(payload), 'InclinePayload')
-            })
+            if (this.protocolMode === 'nus') {
+              const rawVal = Math.round(deg * 10.0)
+              const rawUnsigned = (rawVal & 0xFFFF) >>> 0
+              const payload = [rawUnsigned & 0xFF, (rawUnsigned >> 8) & 0xFF]
+              const packet = buildNusPacket(0x21, payload)
+              await this.enqueueWrite(async () => {
+                await this.writeRaw(packet, `NUS_SET_INCLINE(${deg.toFixed(1)}%)`)
+              })
+            } else {
+              const inclineParam = Math.round(deg * 100)
+              const { header, payload } = buildControlPackets(0x02, inclineParam)
+              await this.enqueueWrite(async () => {
+                await this.writeRaw(hexStringToBytes(header), 'InclineHeader')
+                await new Promise(r => setTimeout(r, 50))
+                await this.writeRaw(hexStringToBytes(payload), 'InclinePayload')
+              })
+            }
             this.addLog(`Incline command (${deg.toFixed(1)}%) sent successfully to treadmill write queue`, 'info')
           } catch (e: any) {
             this.addLog(`setIncline write failed: ${e?.message || e}`, 'error')

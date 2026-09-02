@@ -1,6 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useBleStore, buildControlPackets, hexStringToBytes } from '../app/stores/ble'
+import { useBleStore, buildControlPackets, buildNusPacket, hexStringToBytes } from '../app/stores/ble'
 
 describe('BleStore', () => {
   beforeEach(() => {
@@ -27,6 +27,80 @@ describe('BleStore', () => {
     // time should be roughly 2 seconds
     expect(store.history[0].t).toBe(2)
     expect(Math.round(store.workoutSeconds)).toBe(2)
+  })
+
+  describe('NUS Protocol Packets', () => {
+    it('generates valid NUS handshake and control packets with correct checksum', () => {
+      // Handshake 0x10 -> [0xA5, 0x04, 0x10, 0xB9]
+      const hs = buildNusPacket(0x10)
+      expect(Array.from(hs)).toEqual([0xA5, 0x04, 0x10, 0xB9])
+
+      // Request Control 0x15 -> [0xA5, 0x04, 0x15, 0xBE]
+      const reqCtrl = buildNusPacket(0x15)
+      expect(Array.from(reqCtrl)).toEqual([0xA5, 0x04, 0x15, 0xBE])
+
+      // Start Belt 0x11 with payload [0x01] -> [0xA5, 0x05, 0x11, 0x01, 0xBC]
+      const startBelt = buildNusPacket(0x11, [0x01])
+      expect(Array.from(startBelt)).toEqual([0xA5, 0x05, 0x11, 0x01, 0xBC])
+
+      // Keepalive Watchdog Ping 0x30 with payload [0x00] -> [0xA5, 0x05, 0x30, 0x00, 0xDA]
+      const keepalive = buildNusPacket(0x30, [0x00])
+      expect(Array.from(keepalive)).toEqual([0xA5, 0x05, 0x30, 0x00, 0xDA])
+
+      // Speed 0x20 with 1.00 mph (100 = 0x0064) -> [0xA5, 0x06, 0x20, 0x64, 0x00, 0x2F]
+      const speedPkt = buildNusPacket(0x20, [0x64, 0x00])
+      expect(Array.from(speedPkt)).toEqual([0xA5, 0x06, 0x20, 0x64, 0x00, 0x2F])
+
+      // Incline 0x21 with 2.0% (20 = 0x0014) -> [0xA5, 0x06, 0x21, 0x14, 0x00, 0xE0]
+      const incPkt = buildNusPacket(0x21, [0x14, 0x00])
+      expect(Array.from(incPkt)).toEqual([0xA5, 0x06, 0x21, 0x14, 0x00, 0xE0])
+    })
+
+    it('parses NUS telemetry notification correctly in metric mode', () => {
+      const store = useBleStore()
+      const buffer = new ArrayBuffer(16)
+      const view = new DataView(buffer)
+
+      view.setUint8(0, 0x02) // NUS notification header
+      view.setUint8(1, 0x10) // length 16
+      view.setUint8(2, 0x80) // telemetry opcode
+      view.setUint16(3, 300, true) // speed = 3.00 km/h (raw 300)
+      view.setInt16(5, 45, true) // incline = 4.5% (raw 45)
+      // distance = 250 meters
+      view.setUint8(7, 250 & 0xFF)
+      view.setUint8(8, 0)
+      view.setUint8(9, 0)
+      view.setUint8(13, 0x20) // metric flag enabled
+
+      store.handleNotification(view)
+
+      expect(store.speedKph).toBeCloseTo(3.00, 2)
+      expect(store.inclineDeg).toBeCloseTo(4.5, 1)
+      expect(store.distanceKm).toBeCloseTo(0.25, 3)
+    })
+
+    it('parses NUS telemetry notification correctly in imperial mode', () => {
+      const store = useBleStore()
+      const buffer = new ArrayBuffer(16)
+      const view = new DataView(buffer)
+
+      view.setUint8(0, 0x02)
+      view.setUint8(1, 0x10)
+      view.setUint8(2, 0x80)
+      view.setUint16(3, 200, true) // 2.00 mph = 3.218688 km/h
+      view.setInt16(5, 15, true) // 1.5%
+      // distance = 1000 meters
+      view.setUint8(7, 0xE8)
+      view.setUint8(8, 0x03)
+      view.setUint8(9, 0x00)
+      view.setUint8(13, 0x00) // imperial flag
+
+      store.handleNotification(view)
+
+      expect(store.speedKph).toBeCloseTo(3.218688, 2)
+      expect(store.inclineDeg).toBeCloseTo(1.5, 1)
+      expect(store.distanceKm).toBeCloseTo(1.0, 3)
+    })
   })
 
   describe('IF BLE Protocol Commands', () => {
