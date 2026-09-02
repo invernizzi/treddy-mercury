@@ -95,16 +95,14 @@ export function buildControlPackets(target: 0x01 | 0x02, valueParam: number): { 
   const vUnsigned = (Math.round(valueParam) & 0xffff) >>> 0
   const vLow = vUnsigned & 0xff
   const vHigh = (vUnsigned >> 8) & 0xff
-  // iFit checksum: sum of sub-payload bytes (0x04 + 0x09 + 0x02 + 0x01 + target + vLow + vHigh + 0x00) & 0xFF
-  const checksum = (0x10 + target + vLow + vHigh) & 0xff
 
   const targetHex = target.toString(16).padStart(2, '0')
   const vLowHex = vLow.toString(16).padStart(2, '0')
   const vHighHex = vHigh.toString(16).padStart(2, '0')
-  const checksumHex = checksum.toString(16).padStart(2, '0')
 
   const header = "fe020d02"
-  const payload = `ff0d0204020904090201${targetHex}${vLowHex}${vHighHex}00${checksumHex}0000000000`
+  // 20-byte payload with 7 trailing zero bytes (as verified in working iFit control scripts)
+  const payload = `ff0d0204020904090201${targetHex}${vLowHex}${vHighHex}00000000000000`
 
   return { header, payload }
 }
@@ -519,7 +517,8 @@ export const useBleStore = defineStore('ble', {
       const hexStr = bytes.join('')
       const firstByte = data.getUint8(0)
 
-      if (firstByte === 0x00 && data.byteLength >= 18) {
+      // Real metrics notification: firstByte 0x00, length >= 18, and operation bytes 8-9 == 0x02, 0x02
+      if (firstByte === 0x00 && data.byteLength >= 18 && data.getUint8(8) === 0x02 && data.getUint8(9) === 0x02) {
         const speed = data.getUint16(10, true) / 100.0
         const incline = data.getUint16(12, true) / 100.0
         const distance = data.getUint16(16, true) / 1000.0
@@ -534,7 +533,7 @@ export const useBleStore = defineStore('ble', {
         this.speedKph = speed
         this.inclineDeg = incline
         this.distanceKm = distance
-      } else if (firstByte === 0x01 && data.byteLength >= 11) {
+      } else if (firstByte === 0x01 && data.byteLength >= 11 && data.getUint32(2, true) === 0 && data.getUint8(6) === 0x02) {
         const treadmillSeconds = data.getUint16(9, true)
         this.addLog(`RX Time: ${treadmillSeconds}s [${hexStr}]`, 'rx')
         if (treadmillSeconds > 0) {

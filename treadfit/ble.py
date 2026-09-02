@@ -102,7 +102,6 @@ def build_control_packets(target: int, value: int) -> tuple[bytes, bytes]:
     v_unsigned = value & 0xFFFF
     v_low = v_unsigned & 0xFF
     v_high = (v_unsigned >> 8) & 0xFF
-    checksum = (0x10 + target + v_low + v_high) & 0xFF
 
     header = bytes.fromhex("fe020d02")
     payload = bytes([
@@ -120,7 +119,7 @@ def build_control_packets(target: int, value: int) -> tuple[bytes, bytes]:
         v_low,
         v_high,
         0x00,
-        checksum,
+        0x00,
         0x00,
         0x00,
         0x00,
@@ -186,7 +185,7 @@ class TreadmillClient:
 
         match data[0]:
             case 0x00:
-                if len(data) < 18:
+                if len(data) < 18 or data[8] != 0x02 or data[9] != 0x02:
                     return
                 # Notification message.
                 s = struct.unpack_from("<H", data, 10)[0] / 100.0
@@ -206,7 +205,7 @@ class TreadmillClient:
 
             case 0x01:
                 # Notification message - Time received from treadmill.
-                if len(data) >= 11:
+                if len(data) >= 11 and struct.unpack_from("<I", data, 2)[0] == 0 and data[6] == 0x02:
                     treadmill_secs = struct.unpack_from("<H", data, 9)[0]
                     if treadmill_secs > 0:
                         if (
