@@ -369,7 +369,7 @@ export const useBleStore = defineStore('ble', {
       this.showDisconnectModal = false
     },
 
-    async startWarmup(targetKph: number = 1.0) {
+    async startWarmup(targetKph: number = 1.6) {
       await this.setSpeed(targetKph)
       this.showGuideModal = false
     },
@@ -811,7 +811,11 @@ export const useBleStore = defineStore('ble', {
         if (kph > 10.0) {
             kph = 10.0
         }
-        if (kph > this.speedKph + 2.0) {
+        // Hardware minimum speed on treadmill is 1.0 mph (1.60 km/h)
+        if (kph > 0 && kph < 1.6) {
+            kph = 1.6
+        }
+        if (kph > this.speedKph + 2.0 && this.speedKph > 0) {
             kph = this.speedKph + 2.0
         }
         if (kph < 0) kph = 0
@@ -844,11 +848,38 @@ export const useBleStore = defineStore('ble', {
             } else {
               const speedParam = Math.round(kph * 100)
               const { header, payload } = buildControlPackets(0x01, speedParam)
-              await this.enqueueWrite(async () => {
-                await this.writeRaw(hexStringToBytes(header), 'SpeedHeader')
-                await new Promise(r => setTimeout(r, 50))
-                await this.writeRaw(hexStringToBytes(payload), 'SpeedPayload')
-              })
+
+              if (kph > 0 && this.speedKph === 0) {
+                // Belt is stopped: send Start Workout / Spin Belt sequence to engage motor relay
+                await this.enqueueWrite(async () => {
+                  await this.writeRaw(hexStringToBytes("fe021102"), 'StartHeader1')
+                  await new Promise(r => setTimeout(r, 40))
+                  await this.writeRaw(hexStringToBytes("ff110204020d040d02020310a00000000a00d200"), 'StartInit')
+                  await new Promise(r => setTimeout(r, 50))
+                  await this.writeRaw(hexStringToBytes("fe021102"), 'StartHeader2')
+                  await new Promise(r => setTimeout(r, 40))
+                  await this.writeRaw(hexStringToBytes("ff110204020d040d02020310a00000000200ca00"), 'StartBelt')
+                  await new Promise(r => setTimeout(r, 60))
+                  if (kph > 1.6) {
+                    await this.writeRaw(hexStringToBytes(header), 'SpeedHeader')
+                    await new Promise(r => setTimeout(r, 50))
+                    await this.writeRaw(hexStringToBytes(payload), 'SpeedPayload')
+                  }
+                })
+              } else if (kph === 0) {
+                await this.enqueueWrite(async () => {
+                  const stopPackets = buildControlPackets(0x01, 0)
+                  await this.writeRaw(hexStringToBytes(stopPackets.header), 'SpeedStopHeader')
+                  await new Promise(r => setTimeout(r, 50))
+                  await this.writeRaw(hexStringToBytes(stopPackets.payload), 'SpeedStopPayload')
+                })
+              } else {
+                await this.enqueueWrite(async () => {
+                  await this.writeRaw(hexStringToBytes(header), 'SpeedHeader')
+                  await new Promise(r => setTimeout(r, 50))
+                  await this.writeRaw(hexStringToBytes(payload), 'SpeedPayload')
+                })
+              }
             }
             this.addLog(`Speed command (${kph.toFixed(2)} km/h) sent successfully to treadmill write queue`, 'info')
           } catch (e: any) {

@@ -41,9 +41,9 @@
         <div class="card metric-card interactive-metric">
           <div class="label">SPEED</div>
           <div class="controls-row">
-            <button @click="bleStore.setSpeed(Math.max(0, bleStore.speedKph - 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">-</button>
+            <button @click="bleStore.setSpeed(bleStore.speedKph <= 1.6 ? 0 : Math.max(0, bleStore.speedKph - 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">-</button>
             <div class="value accent">{{ bleStore.speedKph.toFixed(1) }}</div>
-            <button @click="bleStore.setSpeed(bleStore.speedKph === 0 ? 1.0 : Math.min(10, bleStore.speedKph + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
+            <button @click="bleStore.setSpeed(bleStore.speedKph === 0 ? 1.6 : Math.min(10, bleStore.speedKph + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
           </div>
           <div class="unit">km/h</div>
         </div>
@@ -273,19 +273,19 @@
                 </div>
                 <div class="safety-rule">
                   <span class="safety-num">3</span>
-                  <span><strong>Gradual Speed:</strong> Begin with a safe warm-up speed (1.0 km/h) before stepping on the belt.</span>
+                  <span><strong>Gradual Speed:</strong> Begin with a safe warm-up speed (1.6 km/h) before stepping on the belt.</span>
                 </div>
               </div>
 
               <!-- Countdown Overlay if triggered -->
               <div v-if="countdown !== null" class="countdown-hero">
                 <div class="countdown-num">{{ countdown }}</div>
-                <div class="countdown-text">Starting treadmill belt at 1.0 km/h...</div>
+                <div class="countdown-text">Starting treadmill belt at 1.6 km/h...</div>
               </div>
 
               <div v-else class="modal-actions space-between">
                 <button @click="bleStore.closeGuide()" class="secondary-modal-btn">Dismiss & Control Manually</button>
-                <button @click="startWarmupCountdown" class="primary-modal-btn start-walk-btn">🚀 Start Warm-Up (1.0 km/h)</button>
+                <button @click="startWarmupCountdown" class="primary-modal-btn start-walk-btn">🚀 Start Warm-Up (1.6 km/h)</button>
               </div>
             </div>
           </div>
@@ -408,7 +408,7 @@ function startWarmupCountdown() {
     } else {
       countdown.value = null
       clearInterval(timer)
-      await bleStore.startWarmup(1.0)
+      await bleStore.startWarmup(1.6)
     }
   }, 1000)
 }
