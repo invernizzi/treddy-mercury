@@ -74,7 +74,7 @@ FULL_INITIALIZATION_SEQUENCES = [
         "00120204021c041c020900004002184000008030",
         "ff0e2a0000c720580200b400580200ee00000000",
     ],
-    # Remote Control Mode Enable / Start workout sequences (iFit Mode)
+    # Remote Control Mode Enable / Start workout sequences (IF Mode)
     [
         "fe021102",
         "ff110204020d040d02020310a00000000a00d200",
@@ -94,7 +94,7 @@ POLL_SEQUENCE = [
 
 
 def build_control_packets(target: int, value: int) -> tuple[bytes, bytes]:
-    """Generates the header and payload BLE packets for iFit treadmill controls.
+    """Generates the header and payload BLE packets for IF treadmill controls.
 
     target: 0x01 for SPEED, 0x02 for INCLINE
     value: integer parameter (e.g. kph * 100 or incline_deg * 100)
@@ -273,7 +273,7 @@ class TreadmillClient:
 
             try:
                 async with BleakClient(device.address) as client:
-                    self._push_status("Connected. Subscribing to telemetry & sending iFit unlock sequence...")
+                    self._push_status("Connected. Subscribing to telemetry & sending IF unlock sequence...")
                     await asyncio.sleep(0.1)
 
                     await client.start_notify(NOTIFY_UUID, self.parse_treadmill_data)
@@ -281,7 +281,7 @@ class TreadmillClient:
                     # Init sequence
                     total_seqs = len(FULL_INITIALIZATION_SEQUENCES)
                     for idx, seq in enumerate(FULL_INITIALIZATION_SEQUENCES, 1):
-                        self._push_status(f"Unlocking iFit remote control [{idx}/{total_seqs}]...")
+                        self._push_status(f"Unlocking IF remote control [{idx}/{total_seqs}]...")
                         for h in seq:
                             await client.write_gatt_char(
                                 WRITE_UUID, bytes.fromhex(h), response=True

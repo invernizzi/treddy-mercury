@@ -65,7 +65,7 @@ const FULL_INITIALIZATION_SEQUENCES: string[][] = [
     "ff0e2a0000c720580200b400580200ee00000000"
   ],
 
-  // 4. Remote Control Mode Enable / Start workout sequences (iFit Mode)
+  // 4. Remote Control Mode Enable / Start workout sequences (IF Mode)
   [
     "fe021102",
     "ff110204020d040d02020310a00000000a00d200"
@@ -101,7 +101,7 @@ export function buildControlPackets(target: 0x01 | 0x02, valueParam: number): { 
   const vHighHex = vHigh.toString(16).padStart(2, '0')
 
   const header = "fe020d02"
-  // 20-byte payload with 7 trailing zero bytes (as verified in working iFit control scripts)
+  // 20-byte payload with 7 trailing zero bytes (as verified in working IF control scripts)
   const payload = `ff0d0204020904090201${targetHex}${vLowHex}${vHighHex}00000000000000`
 
   return { header, payload }
@@ -455,7 +455,7 @@ export const useBleStore = defineStore('ble', {
       this.handshakeProgress = {
         current: 2,
         total: totalSteps,
-        label: 'Discovering Primary iFit Service & Characteristics...',
+        label: 'Discovering Primary IF Service & Characteristics...',
         percent: 18
       }
       this.addLog('Discovering Primary Service 00001533-1412-efde-1523-785feabcd123...', 'info')
@@ -486,7 +486,7 @@ export const useBleStore = defineStore('ble', {
 
       localStorage.setItem(LAST_DEVICE_ID_KEY, device.id)
 
-      this.addLog(`Sending full iFit treadmill handshake & unlock sequence (${FULL_INITIALIZATION_SEQUENCES.length} sequences)...`, 'info')
+      this.addLog(`Sending full IF treadmill handshake & unlock sequence (${FULL_INITIALIZATION_SEQUENCES.length} sequences)...`, 'info')
       for (let s = 0; s < FULL_INITIALIZATION_SEQUENCES.length; s++) {
         const seq = FULL_INITIALIZATION_SEQUENCES[s]!
         const pct = Math.round(20 + ((s + 1) / FULL_INITIALIZATION_SEQUENCES.length) * 78)

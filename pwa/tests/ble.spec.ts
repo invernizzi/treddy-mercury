@@ -29,8 +29,8 @@ describe('BleStore', () => {
     expect(Math.round(store.workoutSeconds)).toBe(2)
   })
 
-  describe('iFit BLE Protocol Commands', () => {
-    it('generates exact speed command packets matching iFit captures', () => {
+  describe('IF BLE Protocol Commands', () => {
+    it('generates exact speed command packets matching IF captures', () => {
       // 1.0 MPH = 1.60 KPH -> speedParam 160 (0x00a0)
       const p10 = buildControlPackets(0x01, 160)
       expect(p10.header).toBe('fe020d02')
@@ -49,7 +49,7 @@ describe('BleStore', () => {
       expect(p13.payload).toBe('ff0d020402090409020101d10000000000000000')
     })
 
-    it('generates exact incline command packets matching iFit captures', () => {
+    it('generates exact incline command packets matching IF captures', () => {
       // Incline 0.5% -> 50 (0x0032)
       const inc05 = buildControlPackets(0x02, 50)
       expect(inc05.header).toBe('fe020d02')
@@ -74,7 +74,7 @@ describe('BleStore', () => {
     })
   })
 
-  describe('iFit Guidance & Modal Controls', () => {
+  describe('IF Guidance & Modal Controls', () => {
     it('opens and closes guide modal with requested step', () => {
       const store = useBleStore()
       expect(store.showGuideModal).toBe(false)

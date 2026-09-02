@@ -24,7 +24,7 @@ export default defineNuxtConfig({
       name: 'Dino Run',
       short_name: 'Dino Run',
       theme_color: '#000000',
-      description: 'NordicTrack s20i Dashboard & Sync',
+      description: 'NT s20i Dashboard & Sync',
       icons: [
         {
           src: 'pwa-192x192.png',

@@ -3,8 +3,8 @@
     <header>
       <div class="header-top">
         <h1>Dino Run</h1>
-        <button @click="bleStore.openGuide(1)" class="guide-trigger-btn" title="iFit Treadmill Setup Guide">
-          📖 iFit Pairing Guide
+        <button @click="bleStore.openGuide(1)" class="guide-trigger-btn" title="IF Treadmill Setup Guide">
+          📖 IF Pairing Guide
         </button>
       </div>
       <div class="status-indicator" :class="{ connected: bleStore.connected }">
@@ -134,14 +134,14 @@
       </template>
     </div>
 
-    <!-- iFit Guided Connection Wizard Modal -->
+    <!-- IF Guided Connection Wizard Modal -->
     <transition name="fade">
       <div v-if="bleStore.showGuideModal" class="modal-overlay" @click.self="bleStore.closeGuide()">
         <div class="guide-modal">
           <div class="modal-header">
             <div class="modal-title">
               <span class="modal-icon">🏃‍♂️</span>
-              iFit Treadmill Setup & Pairing Guide
+              IF Treadmill Setup & Pairing Guide
             </div>
             <button class="modal-close" @click="bleStore.closeGuide()">&times;</button>
           </div>
@@ -165,7 +165,7 @@
                 <h3>Power On & Attach Safety Key</h3>
               </div>
               <p class="step-desc">
-                NordicTrack and iFit treadmills require the <strong>magnetic safety key</strong> to be firmly in place before Bluetooth transmission is enabled.
+                NT and IF treadmills require the <strong>magnetic safety key</strong> to be firmly in place before Bluetooth transmission is enabled.
               </p>
               <div class="step-checklist">
                 <div class="check-item">
@@ -189,12 +189,12 @@
                 <h3>Press the Bluetooth Sync Button</h3>
               </div>
               <p class="step-desc">
-                Put your treadmill console into pairing mode so it can accept the iFit handshake.
+                Put your treadmill console into pairing mode so it can accept the IF handshake.
               </p>
               <div class="console-box">
                 <div class="console-icon">📡</div>
                 <div class="console-text">
-                  <strong>Press and hold the Bluetooth / iFIT Sync button</strong> on your treadmill console until the blue LED light begins blinking.
+                  <strong>Press and hold the Bluetooth / IF Sync button</strong> on your treadmill console until the blue LED light begins blinking.
                 </div>
               </div>
               <div class="callout-note">
@@ -229,11 +229,11 @@
               <div class="handshake-checklist">
                 <div class="h-step" :class="{ done: bleStore.guidanceStep >= 4, active: bleStore.guidanceStep === 3 && bleStore.handshakePhase === 'connecting' }">
                   <span class="h-bullet">{{ bleStore.guidanceStep >= 4 ? '✓' : '1' }}</span>
-                  <span>Select <strong>I_TL</strong> (NordicTrack) in Bluetooth device chooser</span>
+                  <span>Select <strong>I_TL</strong> (NT) in Bluetooth device chooser</span>
                 </div>
                 <div class="h-step" :class="{ done: bleStore.handshakePhase === 'services' || bleStore.handshakePhase === 'handshake' || bleStore.handshakePhase === 'unlocked', active: bleStore.handshakePhase === 'connecting' && bleStore.guidanceStep === 4 }">
                   <span class="h-bullet">{{ bleStore.handshakePhase !== 'connecting' && bleStore.guidanceStep === 4 ? '✓' : '2' }}</span>
-                  <span>Connect GATT server & discover iFit Service (UUID 1533)</span>
+                  <span>Connect GATT server & discover IF Service (UUID 1533)</span>
                 </div>
                 <div class="h-step" :class="{ done: bleStore.handshakePhase === 'handshake' || bleStore.handshakePhase === 'unlocked', active: bleStore.handshakePhase === 'services' }">
                   <span class="h-bullet">{{ bleStore.handshakePhase === 'handshake' || bleStore.handshakePhase === 'unlocked' ? '✓' : '3' }}</span>
@@ -241,7 +241,7 @@
                 </div>
                 <div class="h-step" :class="{ done: bleStore.handshakePhase === 'unlocked', active: bleStore.handshakePhase === 'handshake' }">
                   <span class="h-bullet">{{ bleStore.handshakePhase === 'unlocked' ? '✓' : '4' }}</span>
-                  <span>Send 18-sequence iFit cryptographic handshake to unlock motor control</span>
+                  <span>Send 18-sequence IF cryptographic handshake to unlock motor control</span>
                 </div>
               </div>
 
