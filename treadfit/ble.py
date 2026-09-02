@@ -1,7 +1,11 @@
 import asyncio
 import struct
 import time
-from bleak import BleakScanner, BleakClient
+try:
+    from bleak import BleakScanner, BleakClient
+except ImportError:
+    BleakScanner = None  # type: ignore
+    BleakClient = None  # type: ignore
 
 from treadfit.calories import calculate_calories
 
@@ -27,6 +31,43 @@ POLL_SEQUENCE = [
     "001202040210041002000a1b9430000040500080",
     "ff02182700000000000000000000000000000000",
 ]
+
+
+def build_control_packets(target: int, value: int) -> tuple[bytes, bytes]:
+    """Generates the header and payload BLE packets for iFit treadmill controls.
+
+    target: 0x01 for SPEED, 0x02 for INCLINE
+    value: integer parameter (e.g. kph * 100 or incline_deg * 100)
+    """
+    v_unsigned = value & 0xFFFF
+    v_low = v_unsigned & 0xFF
+    v_high = (v_unsigned >> 8) & 0xFF
+    checksum = (0x10 + target + v_low + v_high) & 0xFF
+
+    header = bytes.fromhex("fe020d02")
+    payload = bytes([
+        0xFF,
+        0x0D,
+        0x02,
+        0x04,
+        0x02,
+        0x09,
+        0x04,
+        0x09,
+        0x02,
+        0x01,
+        target,
+        v_low,
+        v_high,
+        0x00,
+        checksum,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    ])
+    return header, payload
 
 
 class TreadmillClient:

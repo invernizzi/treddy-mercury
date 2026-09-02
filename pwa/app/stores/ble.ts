@@ -18,12 +18,31 @@ const POLL_SEQUENCE = [
   "ff02182700000000000000000000000000000000",
 ]
 
-function hexStringToBytes(hex: string): Uint8Array {
+export function hexStringToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2)
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
   }
   return bytes
+}
+
+export function buildControlPackets(target: 0x01 | 0x02, valueParam: number): { header: string; payload: string } {
+  // 16-bit signed/unsigned representation for little-endian
+  const vUnsigned = (Math.round(valueParam) & 0xffff) >>> 0
+  const vLow = vUnsigned & 0xff
+  const vHigh = (vUnsigned >> 8) & 0xff
+  // iFit checksum: sum of sub-payload bytes (0x04 + 0x09 + 0x02 + 0x01 + target + vLow + vHigh + 0x00) & 0xFF
+  const checksum = (0x10 + target + vLow + vHigh) & 0xff
+
+  const targetHex = target.toString(16).padStart(2, '0')
+  const vLowHex = vLow.toString(16).padStart(2, '0')
+  const vHighHex = vHigh.toString(16).padStart(2, '0')
+  const checksumHex = checksum.toString(16).padStart(2, '0')
+
+  const header = "fe020d02"
+  const payload = `ff0d0204020904090201${targetHex}${vLowHex}${vHighHex}00${checksumHex}0000000000`
+
+  return { header, payload }
 }
 
 const LAST_DEVICE_ID_KEY = 'treddy_last_device_id'
@@ -50,6 +69,7 @@ interface BleState {
   lastMetricUpdateTime: number
   pollInterval: any
   demoInterval: any
+  writeQueuePromise: Promise<any>
 
   // History of speed/incline/distance samples over the workout, used to plot the chart
   history: { t: number; speed: number; incline: number; distance: number }[]
@@ -76,6 +96,7 @@ export const useBleStore = defineStore('ble', {
     lastMetricUpdateTime: 0,
     pollInterval: null,
     demoInterval: null,
+    writeQueuePromise: Promise.resolve(),
 
     history: []
   }),
@@ -273,7 +294,9 @@ export const useBleStore = defineStore('ble', {
       localStorage.setItem(LAST_DEVICE_ID_KEY, device.id)
 
       for (const hex of INITIALIZATION_SEQUENCE) {
-        await writeChar.writeValue(hexStringToBytes(hex))
+        await this.enqueueWrite(async () => {
+          await this.writeRaw(hexStringToBytes(hex))
+        })
         await new Promise(r => setTimeout(r, 100))
       }
 
@@ -284,9 +307,12 @@ export const useBleStore = defineStore('ble', {
       this.pollInterval = setInterval(async () => {
          if (!this.connected || !this.writeChar) return
          try {
-           for (const hex of POLL_SEQUENCE) {
-             await this.writeChar.writeValue(hexStringToBytes(hex))
-           }
+           await this.enqueueWrite(async () => {
+             for (const hex of POLL_SEQUENCE) {
+               await this.writeRaw(hexStringToBytes(hex))
+               await new Promise(r => setTimeout(r, 20))
+             }
+           })
            this.updateRealtimeMetrics()
            this.addHistoryPoint()
          } catch (e) {
@@ -295,6 +321,37 @@ export const useBleStore = defineStore('ble', {
       }, 1000)
     },
 
+    async enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
+      const prev = this.writeQueuePromise || Promise.resolve()
+      let resolveOp!: (val: T) => void
+      let rejectOp!: (err: any) => void
+      const opPromise = new Promise<T>((res, rej) => {
+        resolveOp = res
+        rejectOp = rej
+      })
+
+      this.writeQueuePromise = prev
+        .catch(() => {})
+        .then(async () => {
+          try {
+            const res = await op()
+            resolveOp(res)
+          } catch (err) {
+            rejectOp(err)
+          }
+        })
+
+      return opPromise
+    },
+
+    async writeRaw(bytes: Uint8Array) {
+      if (!this.writeChar) return
+      if (this.writeChar.writeValueWithResponse) {
+        await this.writeChar.writeValueWithResponse(bytes)
+      } else {
+        await this.writeChar.writeValue(bytes)
+      }
+    },
 
     disconnect() {
       if (this.device && this.device.gatt?.connected) {
@@ -372,7 +429,7 @@ export const useBleStore = defineStore('ble', {
     },
 
     async setSpeed(kph: number) {
-        if (!this.connected || !this.writeChar) return
+        if (!this.connected) return
         
         // Strict safety limits
         if (kph > 10.0) {
@@ -383,47 +440,45 @@ export const useBleStore = defineStore('ble', {
         }
         if (kph < 0) kph = 0
 
-        const speedParam = Math.floor(kph * 100)
-        const pre = hexStringToBytes("fe020d02")
-        const payloadHex = "ff0d020402090409020101" + 
-                          (speedParam & 0xff).toString(16).padStart(2, '0') + 
-                          ((speedParam >> 8) & 0xff).toString(16).padStart(2, '0') + 
-                          "00000000000000"
-        const payloadBytes = hexStringToBytes(payloadHex)
+        const speedParam = Math.round(kph * 100)
+        const { header, payload } = buildControlPackets(0x01, speedParam)
 
-        try {
-            await this.writeChar.writeValue(pre)
-            await new Promise(r => setTimeout(r, 50))
-            await this.writeChar.writeValue(payloadBytes)
-            this.speedKph = kph
-        } catch (e) {
+        if (this.writeChar) {
+          try {
+            await this.enqueueWrite(async () => {
+              await this.writeRaw(hexStringToBytes(header))
+              await new Promise(r => setTimeout(r, 50))
+              await this.writeRaw(hexStringToBytes(payload))
+            })
+          } catch (e) {
             console.error("setSpeed error", e)
+          }
         }
+        this.speedKph = kph
     },
 
     async setIncline(deg: number) {
-        if (!this.connected || !this.writeChar) return
+        if (!this.connected) return
         
-        // Logical bounds for treadmill inclines
-        if (deg > 15.0) deg = 15.0
+        // Logical bounds for treadmill inclines (-3.0% to 20.0%)
+        if (deg > 20.0) deg = 20.0
         if (deg < -3.0) deg = -3.0
 
-        const inclineParam = Math.floor(deg * 100)
-        const pre = hexStringToBytes("fe020d02")
-        const payloadHex = "ff0d020402090409020202" + 
-                          (inclineParam & 0xff).toString(16).padStart(2, '0') + 
-                          ((inclineParam >> 8) & 0xff).toString(16).padStart(2, '0') + 
-                          "00000000000000"
-        const payloadBytes = hexStringToBytes(payloadHex)
+        const inclineParam = Math.round(deg * 100)
+        const { header, payload } = buildControlPackets(0x02, inclineParam)
 
-        try {
-            await this.writeChar.writeValue(pre)
-            await new Promise(r => setTimeout(r, 50))
-            await this.writeChar.writeValue(payloadBytes)
-            this.inclineDeg = deg
-        } catch (e) {
+        if (this.writeChar) {
+          try {
+            await this.enqueueWrite(async () => {
+              await this.writeRaw(hexStringToBytes(header))
+              await new Promise(r => setTimeout(r, 50))
+              await this.writeRaw(hexStringToBytes(payload))
+            })
+          } catch (e) {
             console.error("setIncline error", e)
+          }
         }
+        this.inclineDeg = deg
     },
 
   }
