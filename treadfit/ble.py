@@ -270,6 +270,15 @@ class TreadmillClient:
                             self.seconds_total = treadmill_secs
                             self._push_metrics()
 
+            case 0xFF:
+                # Status and error notification
+                if len(data) >= 4:
+                    status_flags = data[2]
+                    error_code = data[3]
+                    safety_key = bool(status_flags & 0x01)
+                    if not safety_key:
+                        self._push_status("Safety key detached from console!")
+
     def calculate_realtime_metrics(self):
         # Calculate instantaneous calories and time
         now = time.time()
@@ -334,7 +343,7 @@ class TreadmillClient:
                             await client.write_gatt_char(
                                 WRITE_UUID, bytes.fromhex(hex_cmd), response=True
                             )
-                        await asyncio.sleep(1.0)
+                        await asyncio.sleep(0.25)
 
                         # Update derived metrics periodically
                         self.calculate_realtime_metrics()

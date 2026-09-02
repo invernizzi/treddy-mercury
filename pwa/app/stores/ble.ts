@@ -184,10 +184,15 @@ interface BleState {
   hasSyncedInitialState: boolean
   accumulatedCalories: number
   startTime: number
-  lastMetricUpdateTime: number
   pollInterval: any
   keepaliveInterval: any
   demoInterval: any
+  // Hardware status from 0xFF / NUS
+  safetyKeyInserted: boolean
+  beltRunning: boolean
+  inclineMoving: boolean
+  workoutPaused: boolean
+  lastErrorCode: number
 
   // History of speed/incline/distance samples over the workout, used to plot the chart
   history: { t: number; speed: number; incline: number; distance: number }[]
@@ -227,6 +232,11 @@ export const useBleStore = defineStore('ble', {
     pollInterval: null,
     keepaliveInterval: null,
     demoInterval: null,
+    safetyKeyInserted: true,
+    beltRunning: false,
+    inclineMoving: false,
+    workoutPaused: false,
+    lastErrorCode: 0,
 
     history: []
   }),
@@ -617,7 +627,7 @@ export const useBleStore = defineStore('ble', {
              this.addLog(`Poll error: ${e?.message || e}`, 'error')
              console.error("Poll error", e)
            }
-        }, 1000)
+        }, 250)
       }
 
       this.handshakePhase = 'unlocked'
@@ -778,6 +788,27 @@ export const useBleStore = defineStore('ble', {
             this.updateTimeStr(this.workoutSeconds)
           }
         }
+      } else if (firstByte === 0xff && data.byteLength >= 4) {
+        const statusFlags = data.getUint8(2)
+        const errorCode = data.getUint8(3)
+        this.safetyKeyInserted = !!(statusFlags & 0x01)
+        this.beltRunning = !!(statusFlags & 0x02)
+        this.inclineMoving = !!(statusFlags & 0x04)
+        this.workoutPaused = !!(statusFlags & 0x08)
+        this.lastErrorCode = errorCode
+
+        let errorMsg = ''
+        if (errorCode === 0x01) errorMsg = 'Motor Overcurrent'
+        else if (errorCode === 0x02) errorMsg = 'Motor Stall / Speed Sensor'
+        else if (errorCode === 0x03) errorMsg = 'Incline Calibration Error'
+        else if (errorCode === 0x04) errorMsg = 'Safety Key Detached in Motion'
+        else if (errorCode === 0x08) errorMsg = 'Watchdog / Communication Timeout'
+
+        this.addLog(`RX Status: SafetyKey=${this.safetyKeyInserted ? 'OK' : 'PULLED'}, Belt=${this.beltRunning ? 'RUNNING' : 'STOPPED'}, Incline=${this.inclineMoving ? 'MOVING' : 'IDLE'}${errorMsg ? `, Error=${errorMsg}` : ''} [${hexStr}]`, 'rx')
+
+        if (!this.safetyKeyInserted && this.connected && !this.showDisconnectModal) {
+          this.disconnectReason = 'Magnetic safety key detached from console. Attach safety key to resume.'
+        }
       } else {
         this.addLog(`RX Other/Ack [${data.byteLength}B, 0x${firstByte.toString(16).padStart(2, '0')}]: ${hexStr}`, 'rx')
       }
@@ -932,6 +963,82 @@ export const useBleStore = defineStore('ble', {
           this.addLog('setIncline cannot write: writeChar is null', 'error')
         }
         this.inclineDeg = deg
+    },
+
+    async pauseWorkout() {
+      if (!this.connected || !this.writeChar) return
+      this.addLog(`Pausing workout [Mode=${this.protocolMode.toUpperCase()}]...`, 'info')
+      try {
+        if (this.protocolMode === 'nus') {
+          await this.writeRaw(buildNusPacket(0x50), 'NUS_PAUSE_WORKOUT')
+        } else {
+          await this.writeRaw(hexStringToBytes('140201'), 'LegacyPauseWorkout')
+        }
+        this.workoutPaused = true
+      } catch (e: any) {
+        this.addLog(`Pause error: ${e?.message || e}`, 'error')
+      }
+    },
+
+    async resumeWorkout() {
+      if (!this.connected || !this.writeChar) return
+      this.addLog(`Resuming workout [Mode=${this.protocolMode.toUpperCase()}]...`, 'info')
+      try {
+        if (this.protocolMode === 'nus') {
+          await this.writeRaw(buildNusPacket(0x51), 'NUS_RESUME_WORKOUT')
+        } else {
+          await this.writeRaw(hexStringToBytes('140200'), 'LegacyResumeWorkout')
+        }
+        this.workoutPaused = false
+      } catch (e: any) {
+        this.addLog(`Resume error: ${e?.message || e}`, 'error')
+      }
+    },
+
+    async stopWorkout() {
+      if (!this.connected || !this.writeChar) return
+      this.addLog(`Stopping workout [Mode=${this.protocolMode.toUpperCase()}]...`, 'info')
+      try {
+        if (this.protocolMode === 'nus') {
+          await this.writeRaw(buildNusPacket(0x12, [0x00]), 'NUS_STOP_WORKOUT')
+        } else {
+          await this.writeRaw(hexStringToBytes('1000'), 'LegacyStopWorkout')
+        }
+        this.speedKph = 0
+      } catch (e: any) {
+        this.addLog(`Stop error: ${e?.message || e}`, 'error')
+      }
+    },
+
+    async emergencyStop() {
+      if (!this.connected || !this.writeChar) return
+      this.addLog(`EMERGENCY STOP initiated [Mode=${this.protocolMode.toUpperCase()}]!`, 'error')
+      try {
+        if (this.protocolMode === 'nus') {
+          await this.writeRaw(buildNusPacket(0x14), 'NUS_EMERGENCY_STOP')
+        } else {
+          await this.writeRaw(hexStringToBytes('ee00'), 'LegacyEmergencyStop')
+        }
+        this.speedKph = 0
+      } catch (e: any) {
+        this.addLog(`E-Stop error: ${e?.message || e}`, 'error')
+      }
+    },
+
+    async setFan(level: 'off' | 'low' | 'medium' | 'high' | 'auto') {
+      if (!this.connected || !this.writeChar) return
+      const map: Record<string, number> = { off: 0, low: 1, medium: 2, high: 3, auto: 4 }
+      const code = map[level] ?? 0
+      this.addLog(`Setting fan speed to ${level.toUpperCase()} (code=${code})...`, 'info')
+      try {
+        if (this.protocolMode === 'nus') {
+          await this.writeRaw(buildNusPacket(0x40, [code]), `NUS_FAN_${level.toUpperCase()}`)
+        } else {
+          await this.writeRaw(hexStringToBytes(`07010${code}`), `LegacyFan_${level.toUpperCase()}`)
+        }
+      } catch (e: any) {
+        this.addLog(`Fan control error: ${e?.message || e}`, 'error')
+      }
     },
 
   }
