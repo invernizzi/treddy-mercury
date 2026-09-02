@@ -118,6 +118,13 @@ let writeQueuePromise: Promise<any> = Promise.resolve()
 
 const LAST_DEVICE_ID_KEY = 'treddy_last_device_id'
 
+export interface HandshakeProgress {
+  current: number
+  total: number
+  label: string
+  percent: number
+}
+
 interface BleState {
   device: any | null
   server: any | null
@@ -126,6 +133,15 @@ interface BleState {
   status: string
   logs: BleLogEntry[]
   
+  // Guidance & Handshake Progress
+  handshakePhase: 'idle' | 'connecting' | 'services' | 'handshake' | 'unlocked' | 'failed'
+  handshakeProgress: HandshakeProgress
+  showGuideModal: boolean
+  guidanceStep: number
+  showDisconnectModal: boolean
+  disconnectReason: string | null
+  isManualDisconnect: boolean
+
   // Metrics
   speedKph: number
   inclineDeg: number
@@ -155,6 +171,14 @@ export const useBleStore = defineStore('ble', {
     status: 'Disconnected',
     logs: [],
     
+    handshakePhase: 'idle',
+    handshakeProgress: { current: 0, total: 20, label: 'Ready to connect', percent: 0 },
+    showGuideModal: false,
+    guidanceStep: 1,
+    showDisconnectModal: false,
+    disconnectReason: null,
+    isManualDisconnect: false,
+
     speedKph: 0.0,
     inclineDeg: 0.0,
     distanceKm: 0.0,
@@ -293,11 +317,41 @@ export const useBleStore = defineStore('ble', {
         }, 1000)
     },
 
+    openGuide(step: number = 1) {
+      this.guidanceStep = step
+      this.showGuideModal = true
+    },
+
+    closeGuide() {
+      this.showGuideModal = false
+    },
+
+    openDisconnectModal() {
+      this.showDisconnectModal = true
+    },
+
+    closeDisconnectModal() {
+      this.showDisconnectModal = false
+    },
+
+    async startWarmup(targetKph: number = 1.0) {
+      await this.setSpeed(targetKph)
+      this.showGuideModal = false
+    },
+
     async connect() {
       if (!import.meta.client) return
 
       try {
         this.status = 'Requesting Device...'
+        this.handshakePhase = 'connecting'
+        this.guidanceStep = 3
+        this.handshakeProgress = {
+          current: 1,
+          total: FULL_INITIALIZATION_SEQUENCES.length + 3,
+          label: 'Requesting Bluetooth device pairing...',
+          percent: 5
+        }
         this.addLog('Requesting Bluetooth device (filters: acceptAllDevices, optionalServices: [00001533-1412-efde-1523-785feabcd123])...', 'info')
         
         // @ts-ignore
@@ -313,6 +367,13 @@ export const useBleStore = defineStore('ble', {
       } catch (e: any) {
         console.error(e)
         this.status = `Error: ${e}`
+        this.handshakePhase = 'failed'
+        this.handshakeProgress = {
+          current: 0,
+          total: FULL_INITIALIZATION_SEQUENCES.length + 3,
+          label: `Connection failed: ${e?.message || e}. Ensure safety key is attached and press Bluetooth Sync button.`,
+          percent: 0
+        }
         this.addLog(`Connect error: ${e?.message || e}`, 'error')
         this.connected = false
       }
@@ -371,6 +432,15 @@ export const useBleStore = defineStore('ble', {
     async setupDevice(device: any) {
       this.device = device
       this.status = 'Connecting to Server...'
+      this.handshakePhase = 'connecting'
+      this.guidanceStep = 4
+      const totalSteps = FULL_INITIALIZATION_SEQUENCES.length + 3
+      this.handshakeProgress = {
+        current: 1,
+        total: totalSteps,
+        label: `Connecting to GATT server on "${device.name || 'Unnamed'}"...`,
+        percent: 10
+      }
       this.addLog(`Connecting to GATT server on "${device.name || 'Unnamed'}" (${device.id})...`, 'info')
 
       device.addEventListener('gattserverdisconnected', this.onDisconnected)
@@ -381,6 +451,13 @@ export const useBleStore = defineStore('ble', {
       this.addLog('Connected to GATT server successfully.', 'info')
 
       this.status = 'Getting Service...'
+      this.handshakePhase = 'services'
+      this.handshakeProgress = {
+        current: 2,
+        total: totalSteps,
+        label: 'Discovering Primary iFit Service & Characteristics...',
+        percent: 18
+      }
       this.addLog('Discovering Primary Service 00001533-1412-efde-1523-785feabcd123...', 'info')
       const service = await server.getPrimaryService("00001533-1412-efde-1523-785feabcd123")
 
@@ -403,6 +480,7 @@ export const useBleStore = defineStore('ble', {
 
       this.connected = true
       this.status = 'Initializing...'
+      this.handshakePhase = 'handshake'
       this.hasSyncedInitialState = false
       this.history = []
 
@@ -411,6 +489,13 @@ export const useBleStore = defineStore('ble', {
       this.addLog(`Sending full iFit treadmill handshake & unlock sequence (${FULL_INITIALIZATION_SEQUENCES.length} sequences)...`, 'info')
       for (let s = 0; s < FULL_INITIALIZATION_SEQUENCES.length; s++) {
         const seq = FULL_INITIALIZATION_SEQUENCES[s]!
+        const pct = Math.round(20 + ((s + 1) / FULL_INITIALIZATION_SEQUENCES.length) * 78)
+        this.handshakeProgress = {
+          current: s + 3,
+          total: totalSteps,
+          label: `Unlocking Remote Control Mode [Sequence ${s + 1}/${FULL_INITIALIZATION_SEQUENCES.length}]...`,
+          percent: pct
+        }
         await this.enqueueWrite(async () => {
           for (let i = 0; i < seq.length; i++) {
             const hex = seq[i]!
@@ -423,6 +508,15 @@ export const useBleStore = defineStore('ble', {
         await new Promise(r => setTimeout(r, 40))
       }
       this.addLog('Initialization sequence completed successfully. Remote control unlocked. Treadmill is ready.', 'info')
+
+      this.handshakePhase = 'unlocked'
+      this.guidanceStep = 5
+      this.handshakeProgress = {
+        current: totalSteps,
+        total: totalSteps,
+        label: 'Treadmill Ready & Remote Control Unlocked!',
+        percent: 100
+      }
 
       this.status = 'Running'
       this.startTime = Date.now()
@@ -493,6 +587,7 @@ export const useBleStore = defineStore('ble', {
 
     disconnect() {
       this.addLog('Manual disconnect requested.', 'info')
+      this.isManualDisconnect = true
       if (this.device && this.device.gatt?.connected) {
         this.device.gatt.disconnect()
       }
@@ -501,12 +596,20 @@ export const useBleStore = defineStore('ble', {
 
     onDisconnected() {
       this.addLog('GATT server disconnected.', 'info')
+      const wasConnected = this.connected
       this.connected = false
       this.status = 'Disconnected'
       this.server = null
       this.writeChar = null
+      this.handshakePhase = 'idle'
       if (this.pollInterval) clearInterval(this.pollInterval)
       if (this.demoInterval) clearInterval(this.demoInterval)
+
+      if (wasConnected && !this.isManualDisconnect) {
+        this.showDisconnectModal = true
+        this.disconnectReason = 'Treadmill disconnected unexpectedly. Ensure the safety key is attached and press the Bluetooth Sync button on your console to reconnect.'
+      }
+      this.isManualDisconnect = false
     },
 
     handleNotification(data: DataView) {

@@ -94,7 +94,7 @@ class TreadmillApp(App):
             yield Metric("Time", id="time")
             yield Metric("Calories (kcal)", id="calories")
             yield Metric("Output (kcal/h)", id="cal_rate")
-        yield Label("Status: Disconnected", id="status-bar")
+        yield Label("Status: Disconnected (Attach safety key & press Bluetooth Sync button on console)", id="status-bar")
         yield Footer()
 
     def on_metrics_update(self, metrics: dict):

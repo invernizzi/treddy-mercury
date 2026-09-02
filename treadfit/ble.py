@@ -258,34 +258,38 @@ class TreadmillClient:
 
     async def ble_worker(self):
         while not self.stop_event.is_set():
-            self._push_status(f"Scanning for '{DEVICE_NAME}'...")
+            self._push_status(f"Scanning for '{DEVICE_NAME}' (Press Bluetooth Sync button on console)...")
             
             device = await BleakScanner.find_device_by_filter(
                 lambda d, ad: d.name and d.name == DEVICE_NAME
             )
 
             if not device:
-                self._push_status("Device not found. Retrying...")
+                self._push_status("Device not found. (Check safety key & press Bluetooth Sync button) Retrying...")
                 await asyncio.sleep(5)
                 continue
 
-            self._push_status(f"Found {device.name}. Connecting...")
+            self._push_status(f"Found {device.name}. Connecting to GATT server...")
 
             try:
                 async with BleakClient(device.address) as client:
-                    self._push_status("Connected")
+                    self._push_status("Connected. Subscribing to telemetry & sending iFit unlock sequence...")
                     await asyncio.sleep(0.1)
 
                     await client.start_notify(NOTIFY_UUID, self.parse_treadmill_data)
 
                     # Init sequence
-                    for seq in FULL_INITIALIZATION_SEQUENCES:
+                    total_seqs = len(FULL_INITIALIZATION_SEQUENCES)
+                    for idx, seq in enumerate(FULL_INITIALIZATION_SEQUENCES, 1):
+                        self._push_status(f"Unlocking iFit remote control [{idx}/{total_seqs}]...")
                         for h in seq:
                             await client.write_gatt_char(
                                 WRITE_UUID, bytes.fromhex(h), response=True
                             )
                             await asyncio.sleep(0.02)
                         await asyncio.sleep(0.04)
+
+                    self._push_status("Treadmill Ready & Unlocked (Straddle belt before starting)")
 
                     while client.is_connected and not self.stop_event.is_set():
                         for hex_cmd in POLL_SEQUENCE:
@@ -298,5 +302,5 @@ class TreadmillClient:
                         self.calculate_realtime_metrics()
 
             except Exception as e:
-                self._push_status(f"Error: {e}")
+                self._push_status(f"Connection lost: {e}. Press Bluetooth Sync button on console to reconnect.")
                 await asyncio.sleep(5)

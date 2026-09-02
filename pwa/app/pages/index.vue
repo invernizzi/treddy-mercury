@@ -1,7 +1,12 @@
 <template>
   <div class="dashboard-container">
     <header>
-      <h1>Dino Run</h1>
+      <div class="header-top">
+        <h1>Dino Run</h1>
+        <button @click="bleStore.openGuide(1)" class="guide-trigger-btn" title="iFit Treadmill Setup Guide">
+          📖 iFit Pairing Guide
+        </button>
+      </div>
       <div class="status-indicator" :class="{ connected: bleStore.connected }">
         {{ bleStore.status }}
       </div>
@@ -99,7 +104,7 @@
     <div class="controls">
       <!-- Treadmill NOT Connected -->
       <template v-if="!bleStore.connected">
-        <button @click="bleStore.connect()" :disabled="googleConnected === null || bleStore.status !== 'Disconnected'" class="connect-btn">
+        <button @click="startConnectFlow" :disabled="googleConnected === null || bleStore.status !== 'Disconnected'" class="connect-btn">
           <span v-if="bleStore.status !== 'Disconnected'" class="spinner"></span>
           {{ bleStore.status === 'Disconnected' ? 'Connect Treadmill' : bleStore.status }}
         </button>
@@ -111,7 +116,6 @@
           @click="syncWorkout" 
           :disabled="isSyncing"
           class="sync-btn"
-          
         >
           {{ isSyncing ? 'Syncing...' : 'Sync Previous Workout' }}
         </button>
@@ -129,6 +133,197 @@
         </button>
       </template>
     </div>
+
+    <!-- iFit Guided Connection Wizard Modal -->
+    <transition name="fade">
+      <div v-if="bleStore.showGuideModal" class="modal-overlay" @click.self="bleStore.closeGuide()">
+        <div class="guide-modal">
+          <div class="modal-header">
+            <div class="modal-title">
+              <span class="modal-icon">🏃‍♂️</span>
+              iFit Treadmill Setup & Pairing Guide
+            </div>
+            <button class="modal-close" @click="bleStore.closeGuide()">&times;</button>
+          </div>
+
+          <!-- Stepper navigation dots -->
+          <div class="stepper-dots">
+            <div class="step-dot" :class="{ active: bleStore.guidanceStep === 1, done: bleStore.guidanceStep > 1 }">1. Power & Key</div>
+            <div class="step-connector"></div>
+            <div class="step-dot" :class="{ active: bleStore.guidanceStep === 2, done: bleStore.guidanceStep > 2 }">2. Sync Button</div>
+            <div class="step-connector"></div>
+            <div class="step-dot" :class="{ active: bleStore.guidanceStep === 3 || bleStore.guidanceStep === 4, done: bleStore.guidanceStep > 4 }">3. Connect & Unlock</div>
+            <div class="step-connector"></div>
+            <div class="step-dot" :class="{ active: bleStore.guidanceStep === 5, done: bleStore.connected }">4. Safety & Run</div>
+          </div>
+
+          <div class="modal-body">
+            <!-- Step 1: Power & Safety Key -->
+            <div v-if="bleStore.guidanceStep === 1" class="guide-step-content">
+              <div class="step-hero">
+                <div class="hero-badge red-badge">🔑 Step 1 of 4</div>
+                <h3>Power On & Attach Safety Key</h3>
+              </div>
+              <p class="step-desc">
+                NordicTrack and iFit treadmills require the <strong>magnetic safety key</strong> to be firmly in place before Bluetooth transmission is enabled.
+              </p>
+              <div class="step-checklist">
+                <div class="check-item">
+                  <span class="check-icon">✓</span>
+                  <span>Turn the treadmill master power switch <strong>ON</strong>.</span>
+                </div>
+                <div class="check-item">
+                  <span class="check-icon">✓</span>
+                  <span>Insert the <strong>red magnetic safety clip</strong> into the console slot.</span>
+                </div>
+              </div>
+              <div class="modal-actions">
+                <button @click="bleStore.guidanceStep = 2" class="primary-modal-btn">Next: Bluetooth Sync Mode ➔</button>
+              </div>
+            </div>
+
+            <!-- Step 2: Bluetooth Sync Button -->
+            <div v-if="bleStore.guidanceStep === 2" class="guide-step-content">
+              <div class="step-hero">
+                <div class="hero-badge blue-badge">🔵 Step 2 of 4</div>
+                <h3>Press the Bluetooth Sync Button</h3>
+              </div>
+              <p class="step-desc">
+                Put your treadmill console into pairing mode so it can accept the iFit handshake.
+              </p>
+              <div class="console-box">
+                <div class="console-icon">📡</div>
+                <div class="console-text">
+                  <strong>Press and hold the Bluetooth / iFIT Sync button</strong> on your treadmill console until the blue LED light begins blinking.
+                </div>
+              </div>
+              <div class="callout-note">
+                <span class="note-icon">💡</span>
+                <span><strong>Important:</strong> Do not pair via your operating system settings. Always connect directly inside this web app.</span>
+              </div>
+              <div class="modal-actions space-between">
+                <button @click="bleStore.guidanceStep = 1" class="secondary-modal-btn">⬅ Back</button>
+                <button @click="bleStore.connect()" class="primary-modal-btn">Scan & Connect Treadmill ➔</button>
+              </div>
+            </div>
+
+            <!-- Step 3 & 4: Live Handshake & Unlock Progress Stepper -->
+            <div v-if="bleStore.guidanceStep === 3 || bleStore.guidanceStep === 4" class="guide-step-content">
+              <div class="step-hero">
+                <div class="hero-badge purple-badge">
+                  {{ bleStore.handshakePhase === 'unlocked' ? '✅ Unlocked' : '🔄 Connecting' }}
+                </div>
+                <h3>{{ bleStore.handshakePhase === 'unlocked' ? 'Treadmill Ready!' : 'Pairing & Unlocking Handshake' }}</h3>
+              </div>
+              
+              <div class="progress-container">
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" :style="{ width: `${bleStore.handshakeProgress.percent}%` }"></div>
+                </div>
+                <div class="progress-stats">
+                  <span class="progress-label">{{ bleStore.handshakeProgress.label }}</span>
+                  <span class="progress-pct">{{ bleStore.handshakeProgress.percent }}%</span>
+                </div>
+              </div>
+
+              <div class="handshake-checklist">
+                <div class="h-step" :class="{ done: bleStore.guidanceStep >= 4, active: bleStore.guidanceStep === 3 && bleStore.handshakePhase === 'connecting' }">
+                  <span class="h-bullet">{{ bleStore.guidanceStep >= 4 ? '✓' : '1' }}</span>
+                  <span>Select <strong>I_TL</strong> (NordicTrack) in Bluetooth device chooser</span>
+                </div>
+                <div class="h-step" :class="{ done: bleStore.handshakePhase === 'services' || bleStore.handshakePhase === 'handshake' || bleStore.handshakePhase === 'unlocked', active: bleStore.handshakePhase === 'connecting' && bleStore.guidanceStep === 4 }">
+                  <span class="h-bullet">{{ bleStore.handshakePhase !== 'connecting' && bleStore.guidanceStep === 4 ? '✓' : '2' }}</span>
+                  <span>Connect GATT server & discover iFit Service (UUID 1533)</span>
+                </div>
+                <div class="h-step" :class="{ done: bleStore.handshakePhase === 'handshake' || bleStore.handshakePhase === 'unlocked', active: bleStore.handshakePhase === 'services' }">
+                  <span class="h-bullet">{{ bleStore.handshakePhase === 'handshake' || bleStore.handshakePhase === 'unlocked' ? '✓' : '3' }}</span>
+                  <span>Subscribe to Telemetry & Notification stream (UUID 1535)</span>
+                </div>
+                <div class="h-step" :class="{ done: bleStore.handshakePhase === 'unlocked', active: bleStore.handshakePhase === 'handshake' }">
+                  <span class="h-bullet">{{ bleStore.handshakePhase === 'unlocked' ? '✓' : '4' }}</span>
+                  <span>Send 18-sequence iFit cryptographic handshake to unlock motor control</span>
+                </div>
+              </div>
+
+              <div v-if="bleStore.handshakePhase === 'failed'" class="error-box">
+                <span>⚠️ {{ bleStore.handshakeProgress.label }}</span>
+                <button @click="bleStore.connect()" class="retry-btn">Retry Connection</button>
+              </div>
+
+              <div v-if="bleStore.handshakePhase === 'unlocked'" class="modal-actions">
+                <button @click="bleStore.guidanceStep = 5" class="primary-modal-btn">Continue to Safety Briefing ➔</button>
+              </div>
+            </div>
+
+            <!-- Step 5: Pre-Run Safety Briefing & Warm-Up Countdown -->
+            <div v-if="bleStore.guidanceStep === 5" class="guide-step-content">
+              <div class="step-hero">
+                <div class="hero-badge green-badge">👟 Pre-Run Safety</div>
+                <h3>Ready to Run!</h3>
+              </div>
+              
+              <div class="safety-box">
+                <div class="safety-rule">
+                  <span class="safety-num">1</span>
+                  <span><strong>Straddle the Belt:</strong> Stand on the side foot rails before starting the motor.</span>
+                </div>
+                <div class="safety-rule">
+                  <span class="safety-num">2</span>
+                  <span><strong>Attach Safety Clip:</strong> Clip the red safety lanyard to your clothing.</span>
+                </div>
+                <div class="safety-rule">
+                  <span class="safety-num">3</span>
+                  <span><strong>Gradual Speed:</strong> Begin with a safe warm-up speed (1.0 km/h) before stepping on the belt.</span>
+                </div>
+              </div>
+
+              <!-- Countdown Overlay if triggered -->
+              <div v-if="countdown !== null" class="countdown-hero">
+                <div class="countdown-num">{{ countdown }}</div>
+                <div class="countdown-text">Starting treadmill belt at 1.0 km/h...</div>
+              </div>
+
+              <div v-else class="modal-actions space-between">
+                <button @click="bleStore.closeGuide()" class="secondary-modal-btn">Dismiss & Control Manually</button>
+                <button @click="startWarmupCountdown" class="primary-modal-btn start-walk-btn">🚀 Start Warm-Up (1.0 km/h)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Disconnection & Recovery Alert Modal -->
+    <transition name="fade">
+      <div v-if="bleStore.showDisconnectModal" class="modal-overlay" @click.self="bleStore.closeDisconnectModal()">
+        <div class="guide-modal disconnect-modal">
+          <div class="modal-header">
+            <div class="modal-title">
+              <span class="modal-icon">⚠️</span>
+              Treadmill Disconnected
+            </div>
+            <button class="modal-close" @click="bleStore.closeDisconnectModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="disconnect-msg">{{ bleStore.disconnectReason }}</p>
+            <div class="troubleshoot-list">
+              <div class="t-item">
+                <span class="t-icon">🔑</span>
+                <span>Check that the <strong>magnetic safety key</strong> is securely attached to the console.</span>
+              </div>
+              <div class="t-item">
+                <span class="t-icon">📡</span>
+                <span>Press the <strong>Bluetooth Sync</strong> button on your console to re-enter pairing mode.</span>
+              </div>
+            </div>
+            <div class="modal-actions space-between">
+              <button @click="bleStore.closeDisconnectModal()" class="secondary-modal-btn">Dismiss</button>
+              <button @click="reconnectFromModal" class="primary-modal-btn">🔄 Reconnect to Treadmill</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <!-- BLE Debug Logs Drawer -->
     <div class="debug-drawer">
@@ -189,6 +384,34 @@ const syncError = ref(false)
 const syncedWorkout = ref<SyncedSummary | null>(null)
 const showLogs = ref(false)
 const copySuccess = ref(false)
+const countdown = ref<number | null>(null)
+
+function startConnectFlow() {
+  // If not connected, open the guided setup modal at step 1 to guide the user
+  bleStore.openGuide(1)
+}
+
+function reconnectFromModal() {
+  bleStore.closeDisconnectModal()
+  bleStore.openGuide(2)
+}
+
+function startWarmupCountdown() {
+  countdown.value = 3
+  const timer = setInterval(async () => {
+    if (countdown.value === null) {
+      clearInterval(timer)
+      return
+    }
+    if (countdown.value > 1) {
+      countdown.value--
+    } else {
+      countdown.value = null
+      clearInterval(timer)
+      await bleStore.startWarmup(1.0)
+    }
+  }, 1000)
+}
 
 async function copyLogs() {
   const text = bleStore.logs
@@ -320,6 +543,34 @@ async function syncWorkout() {
 header {
   text-align: center;
   margin-bottom: 0.75rem;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  gap: 16px;
+}
+
+.guide-trigger-btn {
+  background: rgba(0, 255, 0, 0.08);
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: bold;
+  transition: all 0.2s;
+  text-transform: none;
+}
+
+.guide-trigger-btn:hover {
+  background: var(--color-primary);
+  color: #000;
+  box-shadow: 0 0 10px rgba(0, 255, 0, 0.4);
 }
 
 .status-indicator {
@@ -861,5 +1112,488 @@ button.danger:hover {
 
 .log-text {
   flex: 1;
+}
+
+/* Modal Overlay & Card Styling */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.guide-modal {
+  background: #0f172a;
+  border: 1px solid rgba(0, 255, 0, 0.3);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 255, 0, 0.15);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 580px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: modalPop 0.25s ease-out;
+}
+
+.disconnect-modal {
+  border-color: rgba(255, 68, 68, 0.4);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 68, 68, 0.2);
+}
+
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.modal-title {
+  font-size: 1.05rem;
+  font-weight: bold;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: #fff;
+  background: transparent;
+}
+
+/* Stepper dots */
+.stepper-dots {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.72rem;
+}
+
+.step-dot {
+  color: #666;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.step-dot.active {
+  color: var(--color-primary);
+  text-shadow: 0 0 8px rgba(0, 255, 0, 0.4);
+}
+
+.step-dot.done {
+  color: #8ab4f8;
+}
+
+.step-connector {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 8px;
+}
+
+.modal-body {
+  padding: 24px 20px;
+}
+
+.step-hero {
+  margin-bottom: 12px;
+}
+
+.hero-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: bold;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.red-badge {
+  background: rgba(234, 67, 53, 0.2);
+  color: #ea4335;
+  border: 1px solid rgba(234, 67, 53, 0.4);
+}
+
+.blue-badge {
+  background: rgba(66, 133, 244, 0.2);
+  color: #8ab4f8;
+  border: 1px solid rgba(66, 133, 244, 0.4);
+}
+
+.purple-badge {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.green-badge {
+  background: rgba(52, 168, 83, 0.2);
+  color: #69db7c;
+  border: 1px solid rgba(52, 168, 83, 0.4);
+}
+
+.step-hero h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #fff;
+  letter-spacing: 1px;
+}
+
+.step-desc {
+  font-size: 0.9rem;
+  color: #ccc;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.step-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
+  color: #ddd;
+}
+
+.check-icon {
+  background: #34A853;
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.console-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(66, 133, 244, 0.1);
+  border: 1px solid rgba(66, 133, 244, 0.3);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.console-icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+
+.console-text {
+  font-size: 0.9rem;
+  color: #e8eaed;
+  line-height: 1.4;
+}
+
+.callout-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border-left: 3px solid #fbbf24;
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.progress-container {
+  margin-bottom: 16px;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4285F4, var(--color-primary));
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px rgba(0, 255, 0, 0.5);
+}
+
+.progress-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
+.progress-label {
+  color: #fff;
+  font-weight: 500;
+}
+
+.progress-pct {
+  color: var(--color-primary);
+  font-weight: bold;
+}
+
+.handshake-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+  font-size: 0.82rem;
+}
+
+.h-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #666;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.2s;
+}
+
+.h-step.active {
+  color: #fff;
+  background: rgba(66, 133, 244, 0.15);
+  border: 1px solid rgba(66, 133, 244, 0.3);
+}
+
+.h-step.done {
+  color: #8ab4f8;
+}
+
+.h-bullet {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.h-step.done .h-bullet {
+  background: #34A853;
+  color: #fff;
+}
+
+.h-step.active .h-bullet {
+  background: #4285F4;
+  color: #fff;
+}
+
+.error-box {
+  background: rgba(234, 67, 53, 0.15);
+  border: 1px solid #ea4335;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  color: #ff8787;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.safety-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(52, 168, 83, 0.08);
+  border: 1px solid rgba(52, 168, 83, 0.3);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.safety-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.88rem;
+  color: #e8eaed;
+  line-height: 1.4;
+}
+
+.safety-num {
+  background: #34A853;
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.countdown-hero {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.countdown-num {
+  font-size: 4rem;
+  font-weight: bold;
+  color: var(--color-primary);
+  text-shadow: 0 0 20px rgba(0, 255, 0, 0.6);
+  animation: pulse 1s infinite;
+}
+
+.countdown-text {
+  font-size: 0.9rem;
+  color: #ccc;
+  margin-top: 6px;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.modal-actions.space-between {
+  justify-content: space-between;
+}
+
+.primary-modal-btn {
+  background: var(--color-primary);
+  color: #000;
+  border: 1px solid var(--color-primary);
+  font-weight: bold;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: none;
+}
+
+.primary-modal-btn:hover {
+  box-shadow: 0 0 14px rgba(0, 255, 0, 0.5);
+}
+
+.secondary-modal-btn {
+  background: transparent;
+  color: #aaa;
+  border: 1px solid #555;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  text-transform: none;
+}
+
+.secondary-modal-btn:hover {
+  border-color: #888;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.retry-btn {
+  background: #ea4335;
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-weight: bold;
+  align-self: flex-start;
+  cursor: pointer;
+}
+
+.start-walk-btn {
+  background: linear-gradient(135deg, #34A853, #4285F4);
+  color: #fff;
+  border: none;
+}
+
+.disconnect-msg {
+  font-size: 0.9rem;
+  color: #ff8787;
+  line-height: 1.4;
+  margin-bottom: 16px;
+}
+
+.troubleshoot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.t-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: #ddd;
+}
+
+.t-icon {
+  font-size: 1.1rem;
 }
 </style>
