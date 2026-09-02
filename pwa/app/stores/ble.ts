@@ -45,6 +45,13 @@ export function buildControlPackets(target: 0x01 | 0x02, valueParam: number): { 
   return { header, payload }
 }
 
+export interface BleLogEntry {
+  id: number
+  time: string
+  text: string
+  type: 'info' | 'tx' | 'rx' | 'error'
+}
+
 let writeQueuePromise: Promise<any> = Promise.resolve()
 
 const LAST_DEVICE_ID_KEY = 'treddy_last_device_id'
@@ -55,6 +62,7 @@ interface BleState {
   writeChar: any | null
   connected: boolean
   status: string
+  logs: BleLogEntry[]
   
   // Metrics
   speedKph: number
@@ -83,6 +91,7 @@ export const useBleStore = defineStore('ble', {
     writeChar: null,
     connected: false,
     status: 'Disconnected',
+    logs: [],
     
     speedKph: 0.0,
     inclineDeg: 0.0,
@@ -102,6 +111,35 @@ export const useBleStore = defineStore('ble', {
   }),
 
   actions: {
+    addLog(text: string, type: 'info' | 'tx' | 'rx' | 'error' = 'info') {
+      const d = new Date()
+      const time = `${d.toTimeString().split(' ')[0]}.${d.getMilliseconds().toString().padStart(3, '0')}`
+      const entry: BleLogEntry = {
+        id: Date.now() + Math.random(),
+        time,
+        text,
+        type
+      }
+      this.logs.push(entry)
+      if (this.logs.length > 200) {
+        this.logs.shift()
+      }
+      const prefix = `[BLE ${type.toUpperCase()}]`
+      if (type === 'error') {
+        console.error(prefix, text)
+      } else if (type === 'tx') {
+        console.log(`%c${prefix} ${text}`, 'color: #4CAF50; font-weight: bold')
+      } else if (type === 'rx') {
+        console.log(`%c${prefix} ${text}`, 'color: #2196F3; font-weight: bold')
+      } else {
+        console.log(prefix, text)
+      }
+    },
+
+    clearLogs() {
+      this.logs = []
+    },
+
     formatTime(totalSeconds: number): string {
       const total = Math.floor(Math.max(0, totalSeconds))
       const m = Math.floor(total / 60)
@@ -198,6 +236,7 @@ export const useBleStore = defineStore('ble', {
 
       try {
         this.status = 'Requesting Device...'
+        this.addLog('Requesting Bluetooth device (filters: acceptAllDevices, optionalServices: [00001533-1412-efde-1523-785feabcd123])...', 'info')
         
         // @ts-ignore
         const device = await navigator.bluetooth.requestDevice({
@@ -207,10 +246,12 @@ export const useBleStore = defineStore('ble', {
           ]
         })
 
+        this.addLog(`User selected device: "${device.name || 'Unnamed'}" (${device.id})`, 'info')
         await this.setupDevice(device)
-      } catch (e) {
+      } catch (e: any) {
         console.error(e)
         this.status = `Error: ${e}`
+        this.addLog(`Connect error: ${e?.message || e}`, 'error')
         this.connected = false
       }
     },
@@ -234,16 +275,19 @@ export const useBleStore = defineStore('ble', {
         if (!device) return
 
         this.status = 'Looking for Treadmill...'
+        this.addLog(`Auto-reconnect: found remembered device "${device.name || 'Unnamed'}" (${device.id})`, 'info')
         
         if (device.watchAdvertisements) {
           const abortController = new AbortController()
           device.addEventListener('advertisementreceived', async () => {
             abortController.abort()
             this.status = 'Reconnecting GATT...'
+            this.addLog('Advertisement received, reconnecting GATT...', 'info')
             try {
               await this.setupDevice(device)
-            } catch (e) {
+            } catch (e: any) {
               this.status = 'Disconnected'
+              this.addLog(`Auto-reconnect GATT error: ${e?.message || e}`, 'error')
             }
           }, { once: true })
           
@@ -255,8 +299,9 @@ export const useBleStore = defineStore('ble', {
         } else {
           await this.setupDevice(device)
         }
-      } catch (e) {
+      } catch (e: any) {
         console.warn('Auto-reconnect failed, manual connect required', e)
+        this.addLog(`Auto-reconnect warning: ${e?.message || e}`, 'info')
         this.status = 'Disconnected'
       }
     },
@@ -264,14 +309,17 @@ export const useBleStore = defineStore('ble', {
     async setupDevice(device: any) {
       this.device = device
       this.status = 'Connecting to Server...'
+      this.addLog(`Connecting to GATT server on "${device.name || 'Unnamed'}" (${device.id})...`, 'info')
 
       device.addEventListener('gattserverdisconnected', this.onDisconnected)
 
       const server = await device.gatt?.connect()
       if (!server) throw new Error('Could not connect to GATT Server')
       this.server = server
+      this.addLog('Connected to GATT server successfully.', 'info')
 
       this.status = 'Getting Service...'
+      this.addLog('Discovering Primary Service 00001533-1412-efde-1523-785feabcd123...', 'info')
       const service = await server.getPrimaryService("00001533-1412-efde-1523-785feabcd123")
 
       this.status = 'Getting Characteristics...'
@@ -280,11 +328,16 @@ export const useBleStore = defineStore('ble', {
 
       this.writeChar = writeChar
 
+      const writeProps = writeChar.properties || {}
+      this.addLog(`Discovered Characteristics: WriteChar=${WRITE_UUID} (write=${writeProps.write}, writeWithoutResponse=${writeProps.writeWithoutResponse}), NotifyChar=${NOTIFY_UUID} (notify=${notifyChar.properties?.notify})`, 'info')
+
+      this.addLog('Subscribing to notifications on NotifyChar (1535)...', 'info')
       await notifyChar.startNotifications()
       notifyChar.addEventListener('characteristicvaluechanged', (event: any) => {
         const value = event.target.value
         if (value) this.handleNotification(value)
       })
+      this.addLog('Notification subscription active.', 'info')
 
       this.connected = true
       this.status = 'Initializing...'
@@ -293,12 +346,15 @@ export const useBleStore = defineStore('ble', {
 
       localStorage.setItem(LAST_DEVICE_ID_KEY, device.id)
 
-      for (const hex of INITIALIZATION_SEQUENCE) {
+      this.addLog(`Sending treadmill initialization handshake (${INITIALIZATION_SEQUENCE.length} packets)...`, 'info')
+      for (let i = 0; i < INITIALIZATION_SEQUENCE.length; i++) {
+        const hex = INITIALIZATION_SEQUENCE[i]
         await this.enqueueWrite(async () => {
-          await this.writeRaw(hexStringToBytes(hex))
+          await this.writeRaw(hexStringToBytes(hex), `Init[${i + 1}/${INITIALIZATION_SEQUENCE.length}]`)
         })
         await new Promise(r => setTimeout(r, 100))
       }
+      this.addLog('Initialization sequence completed successfully. Treadmill is ready.', 'info')
 
       this.status = 'Running'
       this.startTime = Date.now()
@@ -308,14 +364,16 @@ export const useBleStore = defineStore('ble', {
          if (!this.connected || !this.writeChar) return
          try {
            await this.enqueueWrite(async () => {
-             for (const hex of POLL_SEQUENCE) {
-               await this.writeRaw(hexStringToBytes(hex))
+             for (let i = 0; i < POLL_SEQUENCE.length; i++) {
+               const hex = POLL_SEQUENCE[i]
+               await this.writeRaw(hexStringToBytes(hex), `Poll[${i + 1}/${POLL_SEQUENCE.length}]`)
                await new Promise(r => setTimeout(r, 20))
              }
            })
            this.updateRealtimeMetrics()
            this.addHistoryPoint()
-         } catch (e) {
+         } catch (e: any) {
+           this.addLog(`Poll error: ${e?.message || e}`, 'error')
            console.error("Poll error", e)
          }
       }, 1000)
@@ -344,16 +402,29 @@ export const useBleStore = defineStore('ble', {
       return opPromise
     },
 
-    async writeRaw(bytes: Uint8Array) {
-      if (!this.writeChar) return
-      if (this.writeChar.writeValueWithResponse) {
-        await this.writeChar.writeValueWithResponse(bytes)
-      } else {
-        await this.writeChar.writeValue(bytes)
+    async writeRaw(bytes: Uint8Array, label: string = '') {
+      if (!this.writeChar) {
+        this.addLog(`Cannot write (${label}): writeChar is null`, 'error')
+        return
+      }
+      const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+      const t0 = performance.now()
+      try {
+        if (this.writeChar.writeValueWithResponse) {
+          await this.writeChar.writeValueWithResponse(bytes)
+        } else {
+          await this.writeChar.writeValue(bytes)
+        }
+        const elapsed = (performance.now() - t0).toFixed(1)
+        this.addLog(`TX ${label ? `(${label}) ` : ''}[${bytes.length}B]: ${hex} (${elapsed}ms)`, 'tx')
+      } catch (err: any) {
+        this.addLog(`TX ERROR ${label ? `(${label}) ` : ''}[${bytes.length}B ${hex}]: ${err?.message || err}`, 'error')
+        throw err
       }
     },
 
     disconnect() {
+      this.addLog('Manual disconnect requested.', 'info')
       if (this.device && this.device.gatt?.connected) {
         this.device.gatt.disconnect()
       }
@@ -361,6 +432,7 @@ export const useBleStore = defineStore('ble', {
     },
 
     onDisconnected() {
+      this.addLog('GATT server disconnected.', 'info')
       this.connected = false
       this.status = 'Disconnected'
       this.server = null
@@ -370,14 +442,19 @@ export const useBleStore = defineStore('ble', {
     },
 
     handleNotification(data: DataView) {
-      if (data.byteLength < 10) return
-
+      const bytes: string[] = []
+      for (let i = 0; i < data.byteLength; i++) {
+        bytes.push(data.getUint8(i).toString(16).padStart(2, '0'))
+      }
+      const hexStr = bytes.join('')
       const firstByte = data.getUint8(0)
-      
+
       if (firstByte === 0x00 && data.byteLength >= 18) {
         const speed = data.getUint16(10, true) / 100.0
         const incline = data.getUint16(12, true) / 100.0
         const distance = data.getUint16(16, true) / 1000.0
+
+        this.addLog(`RX Metrics: Speed=${speed.toFixed(2)}km/h, Inc=${incline.toFixed(1)}%, Dist=${distance.toFixed(3)}km [${hexStr}]`, 'rx')
         
         if (!this.hasSyncedInitialState && distance > 0) {
           this.syncInitialWorkoutState(distance, speed, incline)
@@ -389,6 +466,7 @@ export const useBleStore = defineStore('ble', {
         this.distanceKm = distance
       } else if (firstByte === 0x01 && data.byteLength >= 11) {
         const treadmillSeconds = data.getUint16(9, true)
+        this.addLog(`RX Time: ${treadmillSeconds}s [${hexStr}]`, 'rx')
         if (treadmillSeconds > 0) {
           if (!this.hasSyncedInitialState && this.distanceKm > 0 && this.accumulatedCalories === 0) {
             const avgSpeed = this.speedKph > 0 ? this.speedKph : (this.distanceKm / treadmillSeconds) * 3600
@@ -407,6 +485,8 @@ export const useBleStore = defineStore('ble', {
             this.updateTimeStr(this.workoutSeconds)
           }
         }
+      } else {
+        this.addLog(`RX Other/Ack [${data.byteLength}B, 0x${firstByte.toString(16).padStart(2, '0')}]: ${hexStr}`, 'rx')
       }
     },
 
@@ -429,36 +509,43 @@ export const useBleStore = defineStore('ble', {
     },
 
     async setSpeed(kph: number) {
-        if (!this.connected) return
+        if (!this.connected) {
+          this.addLog(`setSpeed(${kph}) ignored: treadmill not connected`, 'info')
+          return
+        }
         
-        // Strict safety limits
-        if (kph > 10.0) {
-            kph = 10.0
-        }
-        if (kph > this.speedKph + 2.0) {
-            kph = this.speedKph + 2.0
-        }
+        // Logical bounds for treadmill speed (0.0 to 22.0 km/h)
+        if (kph > 22.0) kph = 22.0
         if (kph < 0) kph = 0
 
         const speedParam = Math.round(kph * 100)
         const { header, payload } = buildControlPackets(0x01, speedParam)
 
+        this.addLog(`setSpeed called: target=${kph.toFixed(2)} km/h (param: ${speedParam}) -> Header: ${header}, Payload: ${payload}`, 'info')
+
         if (this.writeChar) {
           try {
             await this.enqueueWrite(async () => {
-              await this.writeRaw(hexStringToBytes(header))
+              await this.writeRaw(hexStringToBytes(header), 'SpeedHeader')
               await new Promise(r => setTimeout(r, 50))
-              await this.writeRaw(hexStringToBytes(payload))
+              await this.writeRaw(hexStringToBytes(payload), 'SpeedPayload')
             })
-          } catch (e) {
+            this.addLog(`Speed command (${kph.toFixed(2)} km/h) sent successfully to treadmill write queue`, 'info')
+          } catch (e: any) {
+            this.addLog(`setSpeed write failed: ${e?.message || e}`, 'error')
             console.error("setSpeed error", e)
           }
+        } else {
+          this.addLog('setSpeed cannot write: writeChar is null', 'error')
         }
         this.speedKph = kph
     },
 
     async setIncline(deg: number) {
-        if (!this.connected) return
+        if (!this.connected) {
+          this.addLog(`setIncline(${deg}) ignored: treadmill not connected`, 'info')
+          return
+        }
         
         // Logical bounds for treadmill inclines (-3.0% to 20.0%)
         if (deg > 20.0) deg = 20.0
@@ -467,16 +554,22 @@ export const useBleStore = defineStore('ble', {
         const inclineParam = Math.round(deg * 100)
         const { header, payload } = buildControlPackets(0x02, inclineParam)
 
+        this.addLog(`setIncline called: target=${deg.toFixed(1)}% (param: ${inclineParam}) -> Header: ${header}, Payload: ${payload}`, 'info')
+
         if (this.writeChar) {
           try {
             await this.enqueueWrite(async () => {
-              await this.writeRaw(hexStringToBytes(header))
+              await this.writeRaw(hexStringToBytes(header), 'InclineHeader')
               await new Promise(r => setTimeout(r, 50))
-              await this.writeRaw(hexStringToBytes(payload))
+              await this.writeRaw(hexStringToBytes(payload), 'InclinePayload')
             })
-          } catch (e) {
+            this.addLog(`Incline command (${deg.toFixed(1)}%) sent successfully to treadmill write queue`, 'info')
+          } catch (e: any) {
+            this.addLog(`setIncline write failed: ${e?.message || e}`, 'error')
             console.error("setIncline error", e)
           }
+        } else {
+          this.addLog('setIncline cannot write: writeChar is null', 'error')
         }
         this.inclineDeg = deg
     },

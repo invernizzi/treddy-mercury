@@ -38,7 +38,7 @@
           <div class="controls-row">
             <button @click="bleStore.setSpeed(Math.max(0, bleStore.speedKph - 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">-</button>
             <div class="value accent">{{ bleStore.speedKph.toFixed(1) }}</div>
-            <button @click="bleStore.setSpeed(Math.min(20, bleStore.speedKph + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
+            <button @click="bleStore.setSpeed(bleStore.speedKph === 0 ? 1.0 : Math.min(22, bleStore.speedKph + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
           </div>
           <div class="unit">km/h</div>
         </div>
@@ -129,6 +129,45 @@
         </button>
       </template>
     </div>
+
+    <!-- BLE Debug Logs Drawer -->
+    <div class="debug-drawer">
+      <div class="debug-header" @click="showLogs = !showLogs">
+        <span class="debug-title">
+          <span class="debug-dot" :class="{ active: bleStore.connected }"></span>
+          BLE Protocol Logs ({{ bleStore.logs.length }})
+        </span>
+        <div class="debug-header-right">
+          <span class="debug-hint">{{ showLogs ? 'Click to minimize' : 'Click to inspect Bluetooth packets' }}</span>
+          <button class="toggle-btn">{{ showLogs ? '▲ Hide' : '▼ Show Logs' }}</button>
+        </div>
+      </div>
+      <div v-if="showLogs" class="debug-content">
+        <div class="debug-toolbar">
+          <button @click="copyLogs" class="debug-btn">
+            {{ copySuccess ? '✓ Copied to Clipboard!' : '📋 Copy All Logs' }}
+          </button>
+          <button @click="bleStore.clearLogs()" class="debug-btn secondary">
+            Clear Logs
+          </button>
+        </div>
+        <div class="log-console">
+          <div v-if="bleStore.logs.length === 0" class="log-empty">
+            No Bluetooth logs captured yet. Click "Connect Treadmill" or adjust speed/incline to see packet exchanges.
+          </div>
+          <div 
+            v-for="log in bleStore.logs" 
+            :key="log.id" 
+            class="log-row"
+            :class="log.type"
+          >
+            <span class="log-time">{{ log.time }}</span>
+            <span class="log-type-tag">[{{ log.type.toUpperCase() }}]</span>
+            <span class="log-text">{{ log.text }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -148,6 +187,21 @@ const isSyncing = ref(false)
 const syncMessage = ref('')
 const syncError = ref(false)
 const syncedWorkout = ref<SyncedSummary | null>(null)
+const showLogs = ref(false)
+const copySuccess = ref(false)
+
+async function copyLogs() {
+  const text = bleStore.logs
+    .map(l => `[${l.time}] [${l.type.toUpperCase()}] ${l.text}`)
+    .join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    copySuccess.value = true
+    setTimeout(() => { copySuccess.value = false }, 2500)
+  } catch (e) {
+    console.error('Failed to copy logs', e)
+  }
+}
 
 onMounted(async () => {
   // Check URL query parameters for OAuth callbacks
@@ -647,5 +701,165 @@ button.danger:hover {
 .fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+/* Debug Drawer */
+.debug-drawer {
+  margin-top: 1.5rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.debug-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  user-select: none;
+}
+
+.debug-header:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.debug-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #ccc;
+}
+
+.debug-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #666;
+}
+
+.debug-dot.active {
+  background: #34A853;
+  box-shadow: 0 0 6px #34A853;
+}
+
+.debug-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.debug-hint {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.toggle-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #aaa;
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.debug-content {
+  padding: 10px 14px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.debug-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.debug-btn {
+  background: rgba(66, 133, 244, 0.2);
+  border: 1px solid #4285F4;
+  color: #8ab4f8;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.debug-btn:hover {
+  background: rgba(66, 133, 244, 0.4);
+}
+
+.debug-btn.secondary {
+  background: transparent;
+  border-color: #666;
+  color: #aaa;
+}
+
+.debug-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.log-console {
+  background: #090d16;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-empty {
+  color: #666;
+  font-style: italic;
+  padding: 8px;
+  text-align: center;
+}
+
+.log-row {
+  display: flex;
+  gap: 8px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.log-row.tx {
+  color: #69db7c;
+}
+
+.log-row.rx {
+  color: #74c0fc;
+}
+
+.log-row.error {
+  color: #ff8787;
+  font-weight: bold;
+}
+
+.log-row.info {
+  color: #ced4da;
+}
+
+.log-time {
+  color: #868e96;
+  flex-shrink: 0;
+}
+
+.log-type-tag {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.log-text {
+  flex: 1;
 }
 </style>
