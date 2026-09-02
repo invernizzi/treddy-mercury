@@ -38,7 +38,7 @@
           <div class="controls-row">
             <button @click="bleStore.setSpeed(Math.max(0, bleStore.speedKph - 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">-</button>
             <div class="value accent">{{ bleStore.speedKph.toFixed(1) }}</div>
-            <button @click="bleStore.setSpeed(bleStore.speedKph === 0 ? 1.0 : Math.min(22, bleStore.speedKph + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
+            <button @click="bleStore.setSpeed(bleStore.speedKph === 0 ? 1.0 : Math.min(10, bleStore.speedKph + 0.5))" :disabled="!bleStore.connected" class="ctrl-btn">+</button>
           </div>
           <div class="unit">km/h</div>
         </div>

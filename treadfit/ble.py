@@ -16,13 +16,73 @@ DEVICE_NAME = "I_TL"
 WRITE_UUID = "00001534-1412-efde-1523-785feabcd123"
 NOTIFY_UUID = "00001535-1412-efde-1523-785feabcd123"
 
-# --- PROTOCOL CONSTANTS ---
-# 1. Initialization Sequence.
-INITIALIZATION_SEQUENCE = [
-    "fe022c04",
-    "0012020402280428900701cec4b0aaa2a8949696",
-    "0112aca8a2bad0dccefe14003a52786486a6fc18",
-    "ff08324aa0880200004400000000000000000000",
+# 1. Full Initialization & Unlock Sequences.
+FULL_INITIALIZATION_SEQUENCES = [
+    # Initial 6 handshake packet pairs
+    ["fe020802", "ff08020402040204818700000000000000000000"],
+    ["fe020802", "ff08020402040404808800000000000000000000"],
+    ["fe020802", "ff08020402040404889000000000000000000000"],
+    ["fe020a02", "ff0a0204020602068200008a0000000000000000"],
+    ["fe020a02", "ff0a0204020602068400008c0000000000000000"],
+    ["fe020802", "ff08020402040204959b00000000000000000000"],
+    # Primary 4-packet initialization
+    [
+        "fe022c04",
+        "0012020402280428900701cec4b0aaa2a8949696",
+        "0112aca8a2bad0dccefe14003a52786486a6fc18",
+        "ff08324aa0880200004400000000000000000000",
+    ],
+    # Setup / parameter configuration sequences
+    [
+        "fe021903",
+        "001202040215041502000f001000d81c480000e0",
+        "ff070000001000086e0000000000000000000000",
+    ],
+    [
+        "fe021903",
+        "0012020402150415020e00000000000000000000",
+        "ff070000001001003a0000000000000000000000",
+    ],
+    [
+        "fe021703",
+        "0012020402130413020c00000000000000000000",
+        "ff0500800000a500000000000000000000000000",
+    ],
+    [
+        "fe021703",
+        "0012020402130413020c00000000000000000000",
+        "ff0500800000a500000000000000000000000000",
+    ],
+    [
+        "fe021703",
+        "0012020402130413020c00000000000000000000",
+        "ff0500800000a500000000000000000000000000",
+    ],
+    [
+        "fe021703",
+        "0012020402130413020c00000000000000000000",
+        "ff0500800000a500000000000000000000000000",
+    ],
+    [
+        "fe022c04",
+        "0012020402280428900701cec4b0aaa2a8949696",
+        "0112aca8a2bad0dccefe14003a52786486a6fc18",
+        "ff08324aa0880200004400000000000000000000",
+    ],
+    [
+        "fe022003",
+        "00120204021c041c020900004002184000008030",
+        "ff0e2a0000c720580200b400580200ee00000000",
+    ],
+    # Remote Control Mode Enable / Start workout sequences (iFit Mode)
+    [
+        "fe021102",
+        "ff110204020d040d02020310a00000000a00d200",
+    ],
+    [
+        "fe021102",
+        "ff110204020d040d02020310a00000000200ca00",
+    ],
 ]
 
 # 2. Read/Poll Sequence.
@@ -220,11 +280,13 @@ class TreadmillClient:
                     await client.start_notify(NOTIFY_UUID, self.parse_treadmill_data)
 
                     # Init sequence
-                    for h in INITIALIZATION_SEQUENCE:
-                        await client.write_gatt_char(
-                            WRITE_UUID, bytes.fromhex(h), response=True
-                        )
-                        await asyncio.sleep(0.1)
+                    for seq in FULL_INITIALIZATION_SEQUENCES:
+                        for h in seq:
+                            await client.write_gatt_char(
+                                WRITE_UUID, bytes.fromhex(h), response=True
+                            )
+                            await asyncio.sleep(0.02)
+                        await asyncio.sleep(0.04)
 
                     while client.is_connected and not self.stop_event.is_set():
                         for hex_cmd in POLL_SEQUENCE:

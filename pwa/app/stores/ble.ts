@@ -5,11 +5,75 @@ import { calculateCalories } from '../utils/calories'
 const WRITE_UUID = "00001534-1412-efde-1523-785feabcd123"
 const NOTIFY_UUID = "00001535-1412-efde-1523-785feabcd123"
 
-const INITIALIZATION_SEQUENCE = [
-  "fe022c04",
-  "0012020402280428900701cec4b0aaa2a8949696",
-  "0112aca8a2bad0dccefe14003a52786486a6fc18",
-  "ff08324aa0880200004400000000000000000000",
+const FULL_INITIALIZATION_SEQUENCES: string[][] = [
+  // 1. Initial 6 handshake packet pairs
+  ["fe020802", "ff08020402040204818700000000000000000000"],
+  ["fe020802", "ff08020402040404808800000000000000000000"],
+  ["fe020802", "ff08020402040404889000000000000000000000"],
+  ["fe020a02", "ff0a0204020602068200008a0000000000000000"],
+  ["fe020a02", "ff0a0204020602068400008c0000000000000000"],
+  ["fe020802", "ff08020402040204959b00000000000000000000"],
+
+  // 2. Primary 4-packet initialization
+  [
+    "fe022c04",
+    "0012020402280428900701cec4b0aaa2a8949696",
+    "0112aca8a2bad0dccefe14003a52786486a6fc18",
+    "ff08324aa0880200004400000000000000000000"
+  ],
+
+  // 3. Setup / parameter configuration sequences
+  [
+    "fe021903",
+    "001202040215041502000f001000d81c480000e0",
+    "ff070000001000086e0000000000000000000000"
+  ],
+  [
+    "fe021903",
+    "0012020402150415020e00000000000000000000",
+    "ff070000001001003a0000000000000000000000"
+  ],
+  [
+    "fe021703",
+    "0012020402130413020c00000000000000000000",
+    "ff0500800000a500000000000000000000000000"
+  ],
+  [
+    "fe021703",
+    "0012020402130413020c00000000000000000000",
+    "ff0500800000a500000000000000000000000000"
+  ],
+  [
+    "fe021703",
+    "0012020402130413020c00000000000000000000",
+    "ff0500800000a500000000000000000000000000"
+  ],
+  [
+    "fe021703",
+    "0012020402130413020c00000000000000000000",
+    "ff0500800000a500000000000000000000000000"
+  ],
+  [
+    "fe022c04",
+    "0012020402280428900701cec4b0aaa2a8949696",
+    "0112aca8a2bad0dccefe14003a52786486a6fc18",
+    "ff08324aa0880200004400000000000000000000"
+  ],
+  [
+    "fe022003",
+    "00120204021c041c020900004002184000008030",
+    "ff0e2a0000c720580200b400580200ee00000000"
+  ],
+
+  // 4. Remote Control Mode Enable / Start workout sequences (iFit Mode)
+  [
+    "fe021102",
+    "ff110204020d040d02020310a00000000a00d200"
+  ],
+  [
+    "fe021102",
+    "ff110204020d040d02020310a00000000200ca00"
+  ]
 ]
 
 const POLL_SEQUENCE = [
@@ -346,15 +410,21 @@ export const useBleStore = defineStore('ble', {
 
       localStorage.setItem(LAST_DEVICE_ID_KEY, device.id)
 
-      this.addLog(`Sending treadmill initialization handshake (${INITIALIZATION_SEQUENCE.length} packets)...`, 'info')
-      for (let i = 0; i < INITIALIZATION_SEQUENCE.length; i++) {
-        const hex = INITIALIZATION_SEQUENCE[i]
+      this.addLog(`Sending full iFit treadmill handshake & unlock sequence (${FULL_INITIALIZATION_SEQUENCES.length} sequences)...`, 'info')
+      for (let s = 0; s < FULL_INITIALIZATION_SEQUENCES.length; s++) {
+        const seq = FULL_INITIALIZATION_SEQUENCES[s]!
         await this.enqueueWrite(async () => {
-          await this.writeRaw(hexStringToBytes(hex), `Init[${i + 1}/${INITIALIZATION_SEQUENCE.length}]`)
+          for (let i = 0; i < seq.length; i++) {
+            const hex = seq[i]!
+            await this.writeRaw(hexStringToBytes(hex), `Init[${s + 1}/${FULL_INITIALIZATION_SEQUENCES.length}][${i + 1}/${seq.length}]`)
+            if (i < seq.length - 1) {
+              await new Promise(r => setTimeout(r, 20))
+            }
+          }
         })
-        await new Promise(r => setTimeout(r, 100))
+        await new Promise(r => setTimeout(r, 40))
       }
-      this.addLog('Initialization sequence completed successfully. Treadmill is ready.', 'info')
+      this.addLog('Initialization sequence completed successfully. Remote control unlocked. Treadmill is ready.', 'info')
 
       this.status = 'Running'
       this.startTime = Date.now()
@@ -514,8 +584,13 @@ export const useBleStore = defineStore('ble', {
           return
         }
         
-        // Logical bounds for treadmill speed (0.0 to 22.0 km/h)
-        if (kph > 22.0) kph = 22.0
+        // Strict safety limits
+        if (kph > 10.0) {
+            kph = 10.0
+        }
+        if (kph > this.speedKph + 2.0) {
+            kph = this.speedKph + 2.0
+        }
         if (kph < 0) kph = 0
 
         const speedParam = Math.round(kph * 100)
