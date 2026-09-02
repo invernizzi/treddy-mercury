@@ -45,6 +45,8 @@ export function buildControlPackets(target: 0x01 | 0x02, valueParam: number): { 
   return { header, payload }
 }
 
+let writeQueuePromise: Promise<any> = Promise.resolve()
+
 const LAST_DEVICE_ID_KEY = 'treddy_last_device_id'
 
 interface BleState {
@@ -69,7 +71,6 @@ interface BleState {
   lastMetricUpdateTime: number
   pollInterval: any
   demoInterval: any
-  writeQueuePromise: Promise<any>
 
   // History of speed/incline/distance samples over the workout, used to plot the chart
   history: { t: number; speed: number; incline: number; distance: number }[]
@@ -96,7 +97,6 @@ export const useBleStore = defineStore('ble', {
     lastMetricUpdateTime: 0,
     pollInterval: null,
     demoInterval: null,
-    writeQueuePromise: Promise.resolve(),
 
     history: []
   }),
@@ -322,7 +322,7 @@ export const useBleStore = defineStore('ble', {
     },
 
     async enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
-      const prev = this.writeQueuePromise || Promise.resolve()
+      const prev = writeQueuePromise || Promise.resolve()
       let resolveOp!: (val: T) => void
       let rejectOp!: (err: any) => void
       const opPromise = new Promise<T>((res, rej) => {
@@ -330,7 +330,7 @@ export const useBleStore = defineStore('ble', {
         rejectOp = rej
       })
 
-      this.writeQueuePromise = prev
+      writeQueuePromise = prev
         .catch(() => {})
         .then(async () => {
           try {
