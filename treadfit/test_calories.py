@@ -107,13 +107,13 @@ class TestBleProtocol(unittest.TestCase):
         h, p = build_control_packets(0x01, 160)
         self.assertEqual(h.hex(), "fe020d02")
         self.assertEqual(
-            p.hex(), "ff0d020402090409020101a00000000000000000"
+            p.hex(), "ff0d020402090409020101a00000b10000000000"
         )
 
         # 1.1 MPH = 1.77 KPH -> speedParam 177 (0x00b1)
         h, p = build_control_packets(0x01, 177)
         self.assertEqual(
-            p.hex(), "ff0d020402090409020101b10000000000000000"
+            p.hex(), "ff0d020402090409020101b10000c20000000000"
         )
 
     def test_incline_control_packets(self):
@@ -123,13 +123,13 @@ class TestBleProtocol(unittest.TestCase):
         h, p = build_control_packets(0x02, 50)
         self.assertEqual(h.hex(), "fe020d02")
         self.assertEqual(
-            p.hex(), "ff0d020402090409020102320000000000000000"
+            p.hex(), "ff0d020402090409020102320000440000000000"
         )
 
         # Incline 3.0% -> 300 (0x012c)
         h, p = build_control_packets(0x02, 300)
         self.assertEqual(
-            p.hex(), "ff0d0204020904090201022c0100000000000000"
+            p.hex(), "ff0d0204020904090201022c01003f0000000000"
         )
 
 

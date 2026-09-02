@@ -121,14 +121,15 @@ export function buildControlPackets(target: 0x01 | 0x02, valueParam: number): { 
   const vUnsigned = (Math.round(valueParam) & 0xffff) >>> 0
   const vLow = vUnsigned & 0xff
   const vHigh = (vUnsigned >> 8) & 0xff
+  const checksum = (0x10 + target + vLow + vHigh) & 0xff
 
   const targetHex = target.toString(16).padStart(2, '0')
   const vLowHex = vLow.toString(16).padStart(2, '0')
   const vHighHex = vHigh.toString(16).padStart(2, '0')
+  const checksumHex = checksum.toString(16).padStart(2, '0')
 
   const header = "fe020d02"
-  // 20-byte payload with 7 trailing zero bytes (as verified in working IF control scripts)
-  const payload = `ff0d0204020904090201${targetHex}${vLowHex}${vHighHex}00000000000000`
+  const payload = `ff0d0204020904090201${targetHex}${vLowHex}${vHighHex}00${checksumHex}0000000000`
 
   return { header, payload }
 }

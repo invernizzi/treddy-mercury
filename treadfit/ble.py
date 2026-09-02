@@ -117,6 +117,7 @@ def build_control_packets(target: int, value: int) -> tuple[bytes, bytes]:
     v_unsigned = value & 0xFFFF
     v_low = v_unsigned & 0xFF
     v_high = (v_unsigned >> 8) & 0xFF
+    checksum = (0x10 + target + v_low + v_high) & 0xFF
 
     header = bytes.fromhex("fe020d02")
     payload = bytes([
@@ -134,7 +135,7 @@ def build_control_packets(target: int, value: int) -> tuple[bytes, bytes]:
         v_low,
         v_high,
         0x00,
-        0x00,
+        checksum,
         0x00,
         0x00,
         0x00,

@@ -105,41 +105,41 @@ describe('BleStore', () => {
 
   describe('IF BLE Protocol Commands', () => {
     it('generates exact speed command packets matching IF captures', () => {
-      // 1.0 MPH = 1.60 KPH -> speedParam 160 (0x00a0)
+      // 1.0 MPH = 1.60 KPH -> speedParam 160 (0x00a0) -> checksum = 0x10 + 0x01 + 0xa0 + 0x00 = 0xb1
       const p10 = buildControlPackets(0x01, 160)
       expect(p10.header).toBe('fe020d02')
-      expect(p10.payload).toBe('ff0d020402090409020101a00000000000000000')
+      expect(p10.payload).toBe('ff0d020402090409020101a00000b10000000000')
 
-      // 1.1 MPH = 1.77 KPH -> speedParam 177 (0x00b1)
+      // 1.1 MPH = 1.77 KPH -> speedParam 177 (0x00b1) -> checksum = 0x10 + 0x01 + 0xb1 + 0x00 = 0xc2
       const p11 = buildControlPackets(0x01, 177)
-      expect(p11.payload).toBe('ff0d020402090409020101b10000000000000000')
+      expect(p11.payload).toBe('ff0d020402090409020101b10000c20000000000')
 
-      // 1.2 MPH = 1.93 KPH -> speedParam 193 (0x00c1)
+      // 1.2 MPH = 1.93 KPH -> speedParam 193 (0x00c1) -> checksum = 0x10 + 0x01 + 0xc1 + 0x00 = 0xd2
       const p12 = buildControlPackets(0x01, 193)
-      expect(p12.payload).toBe('ff0d020402090409020101c10000000000000000')
+      expect(p12.payload).toBe('ff0d020402090409020101c10000d20000000000')
 
-      // 1.3 MPH = 2.09 KPH -> speedParam 209 (0x00d1)
+      // 1.3 MPH = 2.09 KPH -> speedParam 209 (0x00d1) -> checksum = 0x10 + 0x01 + 0xd1 + 0x00 = 0xe2
       const p13 = buildControlPackets(0x01, 209)
-      expect(p13.payload).toBe('ff0d020402090409020101d10000000000000000')
+      expect(p13.payload).toBe('ff0d020402090409020101d10000e20000000000')
     })
 
     it('generates exact incline command packets matching IF captures', () => {
-      // Incline 0.5% -> 50 (0x0032)
+      // Incline 0.5% -> 50 (0x0032) -> checksum = 0x10 + 0x02 + 0x32 + 0x00 = 0x44
       const inc05 = buildControlPackets(0x02, 50)
       expect(inc05.header).toBe('fe020d02')
-      expect(inc05.payload).toBe('ff0d020402090409020102320000000000000000')
+      expect(inc05.payload).toBe('ff0d020402090409020102320000440000000000')
 
-      // Incline 1.0% -> 100 (0x0064)
+      // Incline 1.0% -> 100 (0x0064) -> checksum = 0x10 + 0x02 + 0x64 + 0x00 = 0x76
       const inc10 = buildControlPackets(0x02, 100)
-      expect(inc10.payload).toBe('ff0d020402090409020102640000000000000000')
+      expect(inc10.payload).toBe('ff0d020402090409020102640000760000000000')
 
-      // Incline 2.5% -> 250 (0x00fa)
+      // Incline 2.5% -> 250 (0x00fa) -> checksum = 0x10 + 0x02 + 0xfa + 0x00 = 0x0c
       const inc25 = buildControlPackets(0x02, 250)
-      expect(inc25.payload).toBe('ff0d020402090409020102fa0000000000000000')
+      expect(inc25.payload).toBe('ff0d020402090409020102fa00000c0000000000')
 
-      // Incline 3.0% -> 300 (0x012c)
+      // Incline 3.0% -> 300 (0x012c) -> checksum = 0x10 + 0x02 + 0x2c + 0x01 = 0x3f
       const inc30 = buildControlPackets(0x02, 300)
-      expect(inc30.payload).toBe('ff0d0204020904090201022c0100000000000000')
+      expect(inc30.payload).toBe('ff0d0204020904090201022c01003f0000000000')
     })
 
     it('hexStringToBytes converts hex strings to byte arrays correctly', () => {

@@ -26,7 +26,7 @@ def test_build_nus_packet():
 def test_build_control_packets():
     header, payload = build_control_packets(0x01, 160)
     assert header == bytes.fromhex("fe020d02")
-    assert payload == bytes.fromhex("ff0d020402090409020101a00000000000000000")
+    assert payload == bytes.fromhex("ff0d020402090409020101a00000b10000000000")
 
 
 def test_parse_nus_telemetry():
