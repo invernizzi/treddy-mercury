@@ -49,8 +49,25 @@ for branch in $branches; do
     cd ..
 
     echo "✅ Successfully merged and validated $branch!"
-    # Push immediately so we save progress
-    git push origin main
+    
+    while true; do
+        read -p "Do you want to push this merge? (y/n): " yn
+        case $yn in
+            [Yy]* ) 
+                echo "Pushing to main..."
+                git push origin main
+                break
+                ;;
+            [Nn]* ) 
+                echo "Skipping push and reverting merge for $branch."
+                git reset --hard HEAD^
+                break
+                ;;
+            * ) 
+                echo "Please answer yes or no."
+                ;;
+        esac
+    done
 done
 
 echo "All done!"
