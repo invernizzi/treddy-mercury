@@ -589,6 +589,25 @@ export const useBleStore = defineStore('ble', {
           }
         }, 250)
       } else {
+        this.addLog(`Waiting for physical console verification (Press Bluetooth Sync button on console)...`, 'info')
+        this.status = 'Awaiting Physical Sync...'
+        this.handshakeProgress = {
+          current: 3,
+          total: totalSteps,
+          label: `Awaiting Physical Sync (Press button on console)...`,
+          percent: 20
+        }
+        
+        this.safetyKeyInserted = false // ensure we actually wait for the response
+        while (this.connected && !this.safetyKeyInserted) {
+            await this.enqueueWrite(async () => {
+                await this.writeRaw(hexStringToBytes("ff02182700000000000000000000000000000000"), 'WaitAuthPing')
+            })
+            await new Promise(r => setTimeout(r, 1000))
+        }
+
+        if (!this.connected) return
+
         this.addLog(`Sending full IF treadmill handshake & unlock sequence (${FULL_INITIALIZATION_SEQUENCES.length} sequences)...`, 'info')
         for (let s = 0; s < FULL_INITIALIZATION_SEQUENCES.length; s++) {
           const seq = FULL_INITIALIZATION_SEQUENCES[s]!

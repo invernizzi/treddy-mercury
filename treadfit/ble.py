@@ -161,6 +161,7 @@ class TreadmillClient:
         self.user_weight_kg = 86.0
         self.accumulated_calories = 0.0
         self.has_synced_initial_state = False
+        self.is_authorized = False
         self.last_metric_update_time = time.time()
 
     def set_user_weight(self, weight):
@@ -277,7 +278,10 @@ class TreadmillClient:
                     error_code = data[3]
                     safety_key = bool(status_flags & 0x01)
                     if not safety_key:
+                        self.is_authorized = False
                         self._push_status("Safety key detached from console!")
+                    else:
+                        self.is_authorized = True
 
     def calculate_realtime_metrics(self):
         # Calculate instantaneous calories and time
@@ -324,6 +328,18 @@ class TreadmillClient:
                     await asyncio.sleep(0.1)
 
                     await client.start_notify(NOTIFY_UUID, self.parse_treadmill_data)
+
+                    self.is_authorized = False
+                    self._push_status("Awaiting Physical Sync (Press button on console)...")
+                    while client.is_connected and not self.stop_event.is_set() and not self.is_authorized:
+                        # Write status poll to get 0xFF feedback
+                        await client.write_gatt_char(
+                            WRITE_UUID, bytes.fromhex("ff02182700000000000000000000000000000000"), response=True
+                        )
+                        await asyncio.sleep(1.0)
+                        
+                    if not client.is_connected or self.stop_event.is_set():
+                        continue
 
                     # Init sequence
                     total_seqs = len(FULL_INITIALIZATION_SEQUENCES)
